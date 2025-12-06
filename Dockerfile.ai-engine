@@ -1,0 +1,74 @@
+# ==========================================
+# AI Engine Dockerfile (Multi-Process)
+# Runs FastAPI + Streamlit with Supervisor
+# ==========================================
+
+FROM python:3.10-slim
+
+LABEL maintainer="IIoT Team"
+LABEL description="AI Engine with FastAPI and Streamlit Admin Dashboard"
+
+# Set working directory
+WORKDIR /app
+
+# Install system dependencies
+RUN apt-get update && apt-get install -y \
+    curl \
+    gcc \
+    g++ \
+    && rm -rf /var/lib/apt/lists/*
+
+# Copy requirements first (for layer caching)
+COPY requirements.txt .
+
+# Install Python dependencies
+RUN pip install --no-cache-dir -r requirements.txt
+
+# Copy application code
+COPY src/ /app/src/
+COPY dashboard/ /app/dashboard/
+
+# Create necessary directories
+RUN mkdir -p /app/models /app/data /app/logs
+
+# Note: models/ and data/ directories will be mounted as volumes at runtime
+
+# Create Supervisord configuration
+RUN echo '[supervisord]' > /etc/supervisord.conf && \
+    echo 'nodaemon=true' >> /etc/supervisord.conf && \
+    echo 'user=root' >> /etc/supervisord.conf && \
+    echo 'logfile=/app/logs/supervisord.log' >> /etc/supervisord.conf && \
+    echo '' >> /etc/supervisord.conf && \
+    echo '[program:fastapi]' >> /etc/supervisord.conf && \
+    echo 'command=uvicorn src.api:app --host 0.0.0.0 --port 8000 --reload' >> /etc/supervisord.conf && \
+    echo 'directory=/app' >> /etc/supervisord.conf && \
+    echo 'autostart=true' >> /etc/supervisord.conf && \
+    echo 'autorestart=true' >> /etc/supervisord.conf && \
+    echo 'stderr_logfile=/app/logs/fastapi.err.log' >> /etc/supervisord.conf && \
+    echo 'stdout_logfile=/app/logs/fastapi.out.log' >> /etc/supervisord.conf && \
+    echo '' >> /etc/supervisord.conf && \
+    echo '[program:streamlit]' >> /etc/supervisord.conf && \
+    echo 'command=streamlit run dashboard/admin.py --server.port 8501 --server.address 0.0.0.0' >> /etc/supervisord.conf && \
+    echo 'directory=/app' >> /etc/supervisord.conf && \
+    echo 'autostart=true' >> /etc/supervisord.conf && \
+    echo 'autorestart=true' >> /etc/supervisord.conf && \
+    echo 'stderr_logfile=/app/logs/streamlit.err.log' >> /etc/supervisord.conf && \
+    echo 'stdout_logfile=/app/logs/streamlit.out.log' >> /etc/supervisord.conf && \
+    echo '' >> /etc/supervisord.conf && \
+    echo '[program:ai_consumer]' >> /etc/supervisord.conf && \
+    echo 'command=python src/main.py' >> /etc/supervisord.conf && \
+    echo 'directory=/app' >> /etc/supervisord.conf && \
+    echo 'autostart=true' >> /etc/supervisord.conf && \
+    echo 'autorestart=true' >> /etc/supervisord.conf && \
+    echo 'stderr_logfile=/app/logs/ai_consumer.err.log' >> /etc/supervisord.conf && \
+    echo 'stdout_logfile=/app/logs/ai_consumer.out.log' >> /etc/supervisord.conf
+
+# Expose ports
+EXPOSE 8000 8501
+
+# Health check
+HEALTHCHECK --interval=30s --timeout=10s --start-period=40s --retries=3 \
+    CMD curl -f http://localhost:8000/health || exit 1
+
+# Run Supervisord
+CMD ["/usr/local/bin/supervisord", "-c", "/etc/supervisord.conf"]

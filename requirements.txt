@@ -1,6 +1,6 @@
-﻿# IIoT Predictive Maintenance - Production Stack
-# Docker + InfluxDB + Grafana Architecture
-# Generated on 2025-12-06 10:27:54
+﻿# IIoT Predictive Maintenance - Full-Stack Production
+# Docker + InfluxDB + Grafana + FastAPI + Next.js Architecture
+# Updated on 2025-12-06
 
 # Core ML & Data Processing
 pandas==2.2.0
@@ -13,6 +13,11 @@ paho-mqtt==2.1.0
 
 # InfluxDB Time-Series Database
 influxdb==5.3.2
+
+# FastAPI REST API Backend
+fastapi==0.108.0
+uvicorn[standard]==0.25.0
+python-multipart==0.0.6
 
 # Grafana API Configuration
 requests==2.32.3

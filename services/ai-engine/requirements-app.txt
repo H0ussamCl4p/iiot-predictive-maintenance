@@ -1,0 +1,6 @@
+fastapi==0.104.1
+uvicorn[standard]==0.24.0
+influxdb==5.3.1
+paho-mqtt==1.6.1
+python-multipart==0.0.6
+supervisor==4.2.5

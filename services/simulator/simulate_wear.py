@@ -3,10 +3,11 @@ import time
 import json
 import random
 import math
+import os
 
-BROKER = "localhost"
+BROKER = os.getenv("MQTT_BROKER", "localhost")
 TOPIC = "factory/plc/data"
-client = mqtt.Client(mqtt.CallbackAPIVersion.VERSION2)
+client = mqtt.Client()
 client.connect(BROKER, 1883, 60)
 
 print("📉 Simulating GRADUAL WEAR (Drift)... Watch your AI Score drop!")
