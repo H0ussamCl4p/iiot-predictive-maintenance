@@ -4,6 +4,7 @@ import json
 import numpy as np
 import os
 import pandas as pd # Added for timestamp handling
+from influxdb import InfluxDBClient
 
 # --- CONFIGURATION ---
 BROKER = "localhost"
@@ -11,6 +12,11 @@ TOPIC = "factory/plc/data"
 MODEL_FILE = "model_brain.pkl"
 SCALER_FILE = "scaler.pkl"
 LOG_FILE = "live_data.csv" # The file where we save history for the dashboard
+
+# InfluxDB Configuration
+INFLUX_HOST = "localhost"
+INFLUX_PORT = 8086
+INFLUX_DB = "factory_data"
 
 # --- INITIALIZATION ---
 # 1. Load the AI
@@ -21,6 +27,16 @@ if not os.path.exists(MODEL_FILE):
 print("🧠 Loading AI Model...")
 model = joblib.load(MODEL_FILE)
 scaler = joblib.load(SCALER_FILE)
+
+# 2. Connect to InfluxDB
+print("📊 Connecting to InfluxDB...")
+try:
+    influx_client = InfluxDBClient(host=INFLUX_HOST, port=INFLUX_PORT)
+    influx_client.switch_database(INFLUX_DB)
+    print(f"✅ Connected to InfluxDB: {INFLUX_DB}")
+except Exception as e:
+    print(f"⚠️  Warning: Could not connect to InfluxDB: {e}")
+    influx_client = None
 
 # 2. Setup the Log File (Create headers if file doesn't exist)
 if not os.path.exists(LOG_FILE):
@@ -62,6 +78,27 @@ def on_message(client, userdata, msg):
         with open(LOG_FILE, "a") as f:
             timestamp = pd.Timestamp.now().strftime('%Y-%m-%d %H:%M:%S')
             f.write(f"{timestamp},{vib},{temp},{score},{status}\n")
+        
+        # 7. SAVE TO INFLUXDB (For Grafana)
+        if influx_client:
+            try:
+                json_body = [
+                    {
+                        "measurement": "machine_telemetry",
+                        "tags": {
+                            "machine_id": "Press_01",
+                            "status": status
+                        },
+                        "fields": {
+                            "vibration": float(vib),
+                            "temperature": float(temp),
+                            "ai_score": float(score)
+                        }
+                    }
+                ]
+                influx_client.write_points(json_body)
+            except Exception as influx_error:
+                print(f"⚠️  InfluxDB write error: {influx_error}")
             
     except Exception as e:
         print(f"Error processing message: {e}")
