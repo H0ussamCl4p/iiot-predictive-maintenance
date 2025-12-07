@@ -3,7 +3,7 @@ FastAPI Backend Server for IIoT Predictive Maintenance
 Provides REST API endpoints for Next.js frontend
 """
 
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, UploadFile, File
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from influxdb import InfluxDBClient
@@ -13,6 +13,8 @@ import uvicorn
 import os
 import json
 import pickle
+import csv
+import io
 
 # Configuration
 INFLUX_HOST = os.getenv("INFLUX_HOST", "localhost")
@@ -832,6 +834,74 @@ async def reset_model():
             return {"message": "No model found to delete"}
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error deleting model: {str(e)}")
+
+
+@app.post("/upload-dataset")
+async def upload_dataset(file: UploadFile = File(...)):
+    """Upload CSV dataset and insert into InfluxDB for training"""
+    try:
+        # Validate file type
+        if not file.filename.endswith('.csv'):
+            raise HTTPException(status_code=400, detail="Only CSV files are allowed")
+        
+        # Read file content
+        contents = await file.read()
+        csv_data = contents.decode('utf-8')
+        
+        # Parse CSV
+        csv_reader = csv.DictReader(io.StringIO(csv_data))
+        rows = list(csv_reader)
+        
+        if not rows:
+            raise HTTPException(status_code=400, detail="CSV file is empty")
+        
+        # Validate required columns
+        required_columns = {'vibration', 'temperature', 'pressure'}
+        if not required_columns.issubset(set(rows[0].keys())):
+            raise HTTPException(
+                status_code=400, 
+                detail=f"CSV must contain columns: {', '.join(required_columns)}"
+            )
+        
+        # Insert data into InfluxDB
+        points = []
+        for row in rows:
+            try:
+                point = {
+                    "measurement": MEASUREMENT,
+                    "tags": {
+                        "machine_id": row.get('machine_id', 'uploaded'),
+                        "source": "csv_upload"
+                    },
+                    "time": row.get('timestamp', datetime.utcnow().isoformat()),
+                    "fields": {
+                        "vibration": float(row['vibration']),
+                        "temperature": float(row['temperature']),
+                        "pressure": float(row['pressure']),
+                        "status": row.get('status', 'NORMAL')
+                    }
+                }
+                points.append(point)
+            except (ValueError, KeyError) as e:
+                # Skip invalid rows
+                continue
+        
+        if not points:
+            raise HTTPException(status_code=400, detail="No valid data rows found in CSV")
+        
+        # Write to InfluxDB
+        influx_client.write_points(points)
+        
+        return {
+            "message": f"Dataset uploaded successfully",
+            "rows_imported": len(points),
+            "filename": file.filename
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Upload failed: {str(e)}")
 
 
 if __name__ == "__main__":

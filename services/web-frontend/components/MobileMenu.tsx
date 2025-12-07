@@ -4,14 +4,13 @@
 
 import { useState } from 'react'
 import Link from 'next/link'
-import { Menu, X, LayoutDashboard, Settings, FileText, Bell, HelpCircle, Users, Brain } from 'lucide-react'
+import { Menu, X, LayoutDashboard, Settings, FileText, Bell, HelpCircle, Users } from 'lucide-react'
 
 export default function MobileMenu() {
   const [isOpen, setIsOpen] = useState(false)
 
   const menuItems = [
     { icon: LayoutDashboard, label: 'Dashboard', href: '/dashboard', active: true },
-    { icon: Brain, label: 'AI Admin', href: '/ai-admin', active: false },
     { icon: FileText, label: 'Reports', href: '#', active: false },
     { icon: Bell, label: 'Notifications', href: '#', active: false },
     { icon: Users, label: 'Team', href: '#', active: false },

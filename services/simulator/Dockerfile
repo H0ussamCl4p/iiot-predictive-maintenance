@@ -1,18 +1,18 @@
 # ==========================================
-# Simulator Dockerfile
-# Runs the wear simulation script
+# Simulator Dockerfile (Speed Optimized)
+# Target: <5s incremental, <30s clean build
 # ==========================================
 
 FROM python:3.10-slim
 
-LABEL maintainer="IIoT Team"
-LABEL description="Machine Wear Simulator"
-
 WORKDIR /app
 
-# Install dependencies
+# Copy requirements first (changes rarely)
 COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
+
+# Use BuildKit cache mount for pip
+RUN --mount=type=cache,target=/root/.cache/pip \
+    pip install --no-compile -r requirements.txt
 
 # Copy simulator code
 COPY simulate_wear.py .

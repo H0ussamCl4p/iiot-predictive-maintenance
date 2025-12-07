@@ -7,7 +7,7 @@ import { useSession, signOut } from 'next-auth/react'
 import { useRouter } from 'next/navigation'
 import Link from 'next/link'
 import useSWR from 'swr'
-import { Activity, Gauge, Thermometer, TrendingUp, AlertCircle, LogOut, Clock, AlertTriangle, CheckCircle, Bell, Wrench, Brain } from 'lucide-react'
+import { Activity, Gauge, Thermometer, TrendingUp, AlertCircle, LogOut, Clock, AlertTriangle, CheckCircle, Bell, Wrench } from 'lucide-react'
 import MetricCard from '@/components/MetricCard'
 import StatusBadge from '@/components/StatusBadge'
 import LiveChart from '@/components/LiveChart'
@@ -112,14 +112,6 @@ export default function DashboardPage() {
             <div className="flex items-center gap-2 sm:gap-4">
               <MobileMenu />
               {liveData && <StatusBadge status={liveData.status} />}
-              <Link 
-                href="/ai-admin"
-                className="hidden md:flex items-center gap-2 px-3 py-2 text-sm text-emerald-400 hover:text-emerald-300 hover:bg-slate-800/50 rounded-lg transition-colors"
-                title="AI Model Administration"
-              >
-                <Brain className="w-4 h-4" />
-                <span>AI Admin</span>
-              </Link>
               <div className="flex items-center gap-2 sm:gap-3">
                 <div className="text-right hidden lg:block">
                   <p className="text-xs text-slate-400">Logged in as</p>
@@ -333,7 +325,7 @@ export default function DashboardPage() {
             <div className="p-4 sm:p-6 bg-slate-900/50 border border-slate-800 rounded-xl">
               <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 sm:gap-0 mb-3 sm:mb-4">
                 <h3 className="text-base sm:text-lg font-semibold text-white flex items-center space-x-2">
-                  <Brain className="w-4 h-4 sm:w-5 sm:h-5" />
+                  <Activity className="w-4 h-4 sm:w-5 sm:h-5" />
                   <span>AI Patterns</span>
                 </h3>
                 <div className="flex items-center space-x-2 px-2 sm:px-3 py-1 bg-slate-800 rounded-full w-fit">

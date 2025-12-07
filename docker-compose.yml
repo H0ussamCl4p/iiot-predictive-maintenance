@@ -1,4 +1,5 @@
-version: '3.8'
+# BuildKit enabled by default in Docker 23+
+# For older versions: DOCKER_BUILDKIT=1 COMPOSE_DOCKER_CLI_BUILD=1
 
 services:
   # ==========================================
@@ -19,9 +20,10 @@ services:
     restart: unless-stopped
     healthcheck:
       test: ["CMD", "mosquitto_sub", "-t", "$$SYS/#", "-C", "1", "-i", "healthcheck", "-W", "3"]
-      interval: 30s
-      timeout: 10s
-      retries: 3
+      interval: 10s
+      timeout: 3s
+      retries: 2
+      start_period: 5s
 
   # Time-Series Database
   influxdb:
@@ -42,9 +44,10 @@ services:
     restart: unless-stopped
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8086/ping"]
-      interval: 30s
-      timeout: 10s
-      retries: 5
+      interval: 10s
+      timeout: 3s
+      retries: 3
+      start_period: 10s
 
   # ==========================================
   # AI ENGINE SERVICE (Brain)
@@ -54,6 +57,8 @@ services:
     build:
       context: ./services/ai-engine
       dockerfile: Dockerfile
+      args:
+        BUILDKIT_INLINE_CACHE: 1
     container_name: iiot_ai_engine
     ports:
       - "8000:8000"  # FastAPI
@@ -76,9 +81,10 @@ services:
     restart: unless-stopped
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
-      interval: 30s
-      timeout: 10s
-      retries: 3
+      interval: 10s
+      timeout: 3s
+      retries: 2
+      start_period: 10s
 
   # ==========================================
   # SIMULATOR SERVICE
@@ -88,6 +94,8 @@ services:
     build:
       context: ./services/simulator
       dockerfile: Dockerfile
+      args:
+        BUILDKIT_INLINE_CACHE: 1
     container_name: iiot_simulator
     environment:
       - MQTT_BROKER=mosquitto
@@ -110,6 +118,8 @@ services:
     build:
       context: ./services/web-frontend
       dockerfile: Dockerfile
+      args:
+        BUILDKIT_INLINE_CACHE: 1
     container_name: iiot_frontend
     ports:
       - "3001:3000"
@@ -125,6 +135,10 @@ services:
     depends_on:
       - ai-engine
     restart: unless-stopped
+
+  # ==========================================
+  # AI Admin: Use native Tkinter app (services/ai-admin-tkinter/app.py)
+  # Run locally: python services/ai-admin-tkinter/app.py
 
 # ==========================================
 # NETWORKING

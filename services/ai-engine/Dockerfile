@@ -1,32 +1,36 @@
 # ==========================================
-# AI Engine Dockerfile (Multi-Process)
-# Runs FastAPI + MQTT Consumer with Supervisor
+# AI Engine Dockerfile (Speed Optimized)
+# Target: <10s incremental, <60s clean build
 # ==========================================
 
-FROM python:3.10-slim
+# Use slim (not alpine) - has pre-built wheels
+FROM python:3.10-slim AS base
 
-LABEL maintainer="IIoT Team"
-LABEL description="AI Engine with FastAPI API"
+# Single layer for system deps (rarely changes)
+RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
+    --mount=type=cache,target=/var/lib/apt,sharing=locked \
+    apt-get update && apt-get install -y --no-install-recommends \
+    curl libgomp1 && \
+    rm -rf /var/lib/apt/lists/*
 
-# Set working directory
+# Dependency installation stage
+FROM base AS deps
 WORKDIR /app
 
-# Install system dependencies
-RUN apt-get update && apt-get install -y \
-    curl \
-    gcc \
-    g++ \
-    && rm -rf /var/lib/apt/lists/*
+# Copy only requirements (changes rarely = better cache)
+COPY requirements-base.txt requirements-app.txt ./
 
-# Install heavy ML dependencies first (rarely change = better caching)
-COPY requirements-base.txt .
+# Use BuildKit cache mount for pip - MASSIVE speedup
 RUN --mount=type=cache,target=/root/.cache/pip \
-    pip install --timeout=1000 --retries=5 -r requirements-base.txt
+    pip install --no-compile -r requirements-base.txt -r requirements-app.txt
 
-# Install application dependencies (change more frequently)
-COPY requirements-app.txt .
-RUN --mount=type=cache,target=/root/.cache/pip \
-    pip install --timeout=1000 --retries=5 -r requirements-app.txt
+# Final runtime stage
+FROM base
+WORKDIR /app
+
+# Copy installed packages from deps stage
+COPY --from=deps /usr/local/lib/python3.10/site-packages /usr/local/lib/python3.10/site-packages
+COPY --from=deps /usr/local/bin /usr/local/bin
 
 # Copy application code
 COPY src/ /app/src/
