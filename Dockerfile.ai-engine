@@ -1,12 +1,12 @@
 # ==========================================
 # AI Engine Dockerfile (Multi-Process)
-# Runs FastAPI + Streamlit with Supervisor
+# Runs FastAPI + AI Consumer with Supervisor
 # ==========================================
 
 FROM python:3.10-slim
 
 LABEL maintainer="IIoT Team"
-LABEL description="AI Engine with FastAPI and Streamlit Admin Dashboard"
+LABEL description="AI Engine with FastAPI and MQTT Consumer"
 
 # Set working directory
 WORKDIR /app
@@ -26,7 +26,6 @@ RUN pip install --no-cache-dir -r requirements.txt
 
 # Copy application code
 COPY src/ /app/src/
-COPY dashboard/ /app/dashboard/
 
 # Create necessary directories
 RUN mkdir -p /app/models /app/data /app/logs
@@ -47,14 +46,6 @@ RUN echo '[supervisord]' > /etc/supervisord.conf && \
     echo 'stderr_logfile=/app/logs/fastapi.err.log' >> /etc/supervisord.conf && \
     echo 'stdout_logfile=/app/logs/fastapi.out.log' >> /etc/supervisord.conf && \
     echo '' >> /etc/supervisord.conf && \
-    echo '[program:streamlit]' >> /etc/supervisord.conf && \
-    echo 'command=streamlit run dashboard/admin.py --server.port 8501 --server.address 0.0.0.0' >> /etc/supervisord.conf && \
-    echo 'directory=/app' >> /etc/supervisord.conf && \
-    echo 'autostart=true' >> /etc/supervisord.conf && \
-    echo 'autorestart=true' >> /etc/supervisord.conf && \
-    echo 'stderr_logfile=/app/logs/streamlit.err.log' >> /etc/supervisord.conf && \
-    echo 'stdout_logfile=/app/logs/streamlit.out.log' >> /etc/supervisord.conf && \
-    echo '' >> /etc/supervisord.conf && \
     echo '[program:ai_consumer]' >> /etc/supervisord.conf && \
     echo 'command=python src/main.py' >> /etc/supervisord.conf && \
     echo 'directory=/app' >> /etc/supervisord.conf && \
@@ -64,7 +55,7 @@ RUN echo '[supervisord]' > /etc/supervisord.conf && \
     echo 'stdout_logfile=/app/logs/ai_consumer.out.log' >> /etc/supervisord.conf
 
 # Expose ports
-EXPOSE 8000 8501
+EXPOSE 8000
 
 # Health check
 HEALTHCHECK --interval=30s --timeout=10s --start-period=40s --retries=3 \
