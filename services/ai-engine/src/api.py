@@ -15,6 +15,9 @@ import json
 import pickle
 import csv
 import io
+import numpy as np
+from sklearn.preprocessing import StandardScaler
+from sklearn.ensemble import RandomForestRegressor
 
 # Configuration
 INFLUX_HOST = os.getenv("INFLUX_HOST", "localhost")
@@ -22,6 +25,7 @@ INFLUX_PORT = int(os.getenv("INFLUX_PORT", "8086"))
 INFLUX_DB = os.getenv("INFLUX_DB", "factory_data")
 MEASUREMENT = "machine_telemetry"
 MODEL_PATH = "/app/models/anomaly_model.pkl"
+PREDICTIVE_MODEL_PATH = "/app/models/predictive_model.pkl"
 
 # Initialize FastAPI
 app = FastAPI(
@@ -980,6 +984,304 @@ async def upload_dataset(file: UploadFile = File(...)):
         raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Upload failed: {str(e)}")
+
+
+# ============================================================================
+# COMBINED PREDICTION ENDPOINT - Real-time Anomaly + Future Failure
+# ============================================================================
+
+class PredictionRequest(BaseModel):
+    """Request model for combined prediction"""
+    data: Dict[str, float]  # Current sensor readings
+    
+    class Config:
+        json_schema_extra = {
+            "example": {
+                "data": {
+                    "Humidity": 65.0,
+                    "Temperature": 45.0,
+                    "Age": 12.0,
+                    "Quantity": 42000.0
+                }
+            }
+        }
+
+
+@app.post("/predict")
+async def predict_combined(request: PredictionRequest):
+    """
+    Combined prediction endpoint that provides:
+    1. Real-time anomaly detection (Is it anomalous NOW?)
+    2. Future failure prediction (WHEN will it fail?)
+    
+    Returns comprehensive analysis with risk assessment
+    """
+    try:
+        input_data = request.data
+        
+        # =====================================================================
+        # Part 1: Real-time Anomaly Detection (Isolation Forest)
+        # =====================================================================
+        anomaly_result = {
+            "is_anomaly": False,
+            "anomaly_score": 0,
+            "status": "UNKNOWN",
+            "model_loaded": False
+        }
+        
+        if os.path.exists(MODEL_PATH):
+            try:
+                with open(MODEL_PATH, 'rb') as f:
+                    model_data = pickle.load(f)
+                
+                # Handle both old and new model formats
+                if isinstance(model_data, dict):
+                    model = model_data.get('model')
+                    scaler = model_data.get('scaler')
+                    expected_features = model_data.get('columns', [])
+                else:
+                    model = model_data
+                    scaler = None
+                    expected_features = list(input_data.keys())
+                
+                # Prepare input for anomaly detection
+                input_df = np.array([[input_data.get(feat, 0) for feat in expected_features]])
+                
+                if scaler:
+                    input_scaled = scaler.transform(input_df)
+                else:
+                    input_scaled = input_df
+                
+                # Predict anomaly (-1 = anomaly, 1 = normal)
+                prediction = model.predict(input_scaled)[0]
+                anomaly_score_raw = model.score_samples(input_scaled)[0]
+                
+                # Convert to 0-100 scale (lower = more anomalous)
+                anomaly_score = max(0, min(100, int((anomaly_score_raw + 0.5) * 100)))
+                
+                # Calculate heuristic score for better interpretation
+                heuristic_score = 0
+                warnings = []
+                
+                # Temperature checks
+                temp = input_data.get('Temperature', 0)
+                if temp > 80:
+                    heuristic_score += 30
+                    warnings.append("🔴 Critical temperature detected")
+                elif temp > 70:
+                    heuristic_score += 15
+                    warnings.append("🟡 High temperature warning")
+                
+                # Humidity checks
+                humidity = input_data.get('Humidity', 0)
+                if humidity > 85:
+                    heuristic_score += 25
+                    warnings.append("🔴 Extreme humidity levels")
+                elif humidity > 75:
+                    heuristic_score += 10
+                    warnings.append("🟡 High humidity detected")
+                
+                # Age checks
+                age = input_data.get('Age', 0)
+                if age > 20:
+                    heuristic_score += 20
+                    warnings.append("⚠️ Equipment very old")
+                elif age > 15:
+                    heuristic_score += 10
+                    warnings.append("⚠️ Equipment aging")
+                
+                # MTTF checks (if available)
+                mttf = input_data.get('MTTF', input_data.get('MTTF ', 0))
+                if mttf > 0:
+                    if mttf < 100:
+                        heuristic_score += 35
+                        warnings.append("🔴 Critical MTTF - Failure imminent")
+                    elif mttf < 300:
+                        heuristic_score += 20
+                        warnings.append("🟡 Low MTTF - Maintenance needed")
+                    elif mttf < 500:
+                        heuristic_score += 5
+                        warnings.append("ℹ️ MTTF below average")
+                
+                # Determine status
+                if heuristic_score >= 60 or prediction == -1:
+                    status = "ANOMALY"
+                    risk_level = "CRITICAL"
+                    status_emoji = "🔴"
+                elif heuristic_score >= 30:
+                    status = "WARNING"
+                    risk_level = "MEDIUM"
+                    status_emoji = "🟡"
+                else:
+                    status = "NORMAL"
+                    risk_level = "LOW"
+                    status_emoji = "✅"
+                
+                anomaly_result = {
+                    "is_anomaly": (status == "ANOMALY"),
+                    "status": status,
+                    "status_emoji": status_emoji,
+                    "risk_level": risk_level,
+                    "anomaly_score": heuristic_score,
+                    "model_score": anomaly_score,
+                    "warnings": warnings,
+                    "model_loaded": True
+                }
+                
+            except Exception as e:
+                print(f"Anomaly detection error: {e}")
+                anomaly_result["error"] = str(e)
+        
+        # =====================================================================
+        # Part 2: Future Failure Prediction (Random Forest Regressor)
+        # =====================================================================
+        prediction_result = {
+            "predicted_mttf": None,
+            "estimated_days_until_failure": None,
+            "future_risk_level": "UNKNOWN",
+            "recommended_action": "Model not available",
+            "model_loaded": False
+        }
+        
+        if os.path.exists(PREDICTIVE_MODEL_PATH):
+            try:
+                with open(PREDICTIVE_MODEL_PATH, 'rb') as f:
+                    pred_model_data = pickle.load(f)
+                
+                pred_model = pred_model_data['model']
+                pred_scaler = pred_model_data['scaler']
+                pred_features = pred_model_data['features']
+                
+                # Prepare input for prediction
+                pred_input = np.array([[input_data.get(feat, 0) for feat in pred_features]])
+                pred_input_scaled = pred_scaler.transform(pred_input)
+                
+                # Predict MTTF
+                predicted_mttf = pred_model.predict(pred_input_scaled)[0]
+                days_estimate = predicted_mttf / 24  # Convert hours to days
+                
+                # Risk assessment based on predicted MTTF
+                if predicted_mttf < 100:
+                    future_risk = "CRITICAL"
+                    future_emoji = "🔴"
+                    action = "IMMEDIATE MAINTENANCE REQUIRED - Equipment likely to fail within days"
+                    confidence = "High"
+                elif predicted_mttf < 300:
+                    future_risk = "HIGH"
+                    future_emoji = "🟠"
+                    action = "Schedule maintenance within 1-2 weeks"
+                    confidence = "High"
+                elif predicted_mttf < 500:
+                    future_risk = "MEDIUM"
+                    future_emoji = "🟡"
+                    action = "Monitor closely, plan maintenance within next month"
+                    confidence = "Medium"
+                else:
+                    future_risk = "LOW"
+                    future_emoji = "🟢"
+                    action = "Continue normal operation, routine maintenance sufficient"
+                    confidence = "Medium"
+                
+                # Get feature importance for explanation
+                feature_importance = {
+                    feat: float(imp) 
+                    for feat, imp in zip(pred_features, pred_model.feature_importances_)
+                }
+                
+                # Find most critical factor
+                most_critical_factor = max(
+                    [(feat, input_data.get(feat, 0), imp) for feat, imp in feature_importance.items()],
+                    key=lambda x: x[2]
+                )
+                
+                prediction_result = {
+                    "predicted_mttf": round(predicted_mttf, 2),
+                    "estimated_days_until_failure": round(days_estimate, 1),
+                    "future_risk_level": future_risk,
+                    "future_risk_emoji": future_emoji,
+                    "recommended_action": action,
+                    "confidence": confidence,
+                    "feature_importance": feature_importance,
+                    "most_critical_factor": {
+                        "name": most_critical_factor[0],
+                        "value": most_critical_factor[1],
+                        "importance": round(most_critical_factor[2] * 100, 1)
+                    },
+                    "model_loaded": True
+                }
+                
+            except Exception as e:
+                print(f"Predictive model error: {e}")
+                prediction_result["error"] = str(e)
+        
+        # =====================================================================
+        # Part 3: Combined Risk Assessment
+        # =====================================================================
+        
+        # Overall risk is highest of current + future
+        risk_levels = {"LOW": 0, "MEDIUM": 1, "HIGH": 2, "CRITICAL": 3, "UNKNOWN": -1}
+        current_risk_val = risk_levels.get(anomaly_result.get("risk_level", "UNKNOWN"), -1)
+        future_risk_val = risk_levels.get(prediction_result.get("future_risk_level", "UNKNOWN"), -1)
+        
+        overall_risk_val = max(current_risk_val, future_risk_val)
+        overall_risk = [k for k, v in risk_levels.items() if v == overall_risk_val][0] if overall_risk_val >= 0 else "UNKNOWN"
+        
+        # Generate comprehensive recommendation
+        if overall_risk == "CRITICAL":
+            overall_action = "⚠️ URGENT: Both current conditions and future predictions indicate critical risk. Shut down equipment and perform immediate inspection."
+        elif overall_risk == "HIGH":
+            overall_action = "⚠️ HIGH PRIORITY: Schedule maintenance within 24-48 hours to prevent potential failure."
+        elif overall_risk == "MEDIUM":
+            overall_action = "⚠️ ATTENTION: Monitor closely and schedule maintenance within 1-2 weeks."
+        else:
+            overall_action = "✅ Equipment operating normally. Continue routine monitoring and maintenance schedule."
+        
+        # Return combined results
+        return {
+            "timestamp": datetime.utcnow().isoformat() + "Z",
+            "input_data": input_data,
+            
+            # Current state analysis
+            "current_state": {
+                **anomaly_result,
+                "description": "Real-time anomaly detection using Isolation Forest"
+            },
+            
+            # Future prediction
+            "future_prediction": {
+                **prediction_result,
+                "description": "Time-to-failure prediction using Random Forest Regressor"
+            },
+            
+            # Overall assessment
+            "overall_assessment": {
+                "risk_level": overall_risk,
+                "recommendation": overall_action,
+                "analysis": f"Current: {anomaly_result.get('status', 'UNKNOWN')}, Future: {prediction_result.get('future_risk_level', 'UNKNOWN')}"
+            }
+        }
+        
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Prediction failed: {str(e)}")
+
+
+@app.get("/models/status")
+async def get_models_status():
+    """Check which models are available"""
+    return {
+        "anomaly_detection_model": {
+            "available": os.path.exists(MODEL_PATH),
+            "path": MODEL_PATH,
+            "type": "Isolation Forest",
+            "purpose": "Real-time anomaly detection"
+        },
+        "predictive_model": {
+            "available": os.path.exists(PREDICTIVE_MODEL_PATH),
+            "path": PREDICTIVE_MODEL_PATH,
+            "type": "Random Forest Regressor",
+            "purpose": "Future failure prediction"
+        }
+    }
 
 
 if __name__ == "__main__":
