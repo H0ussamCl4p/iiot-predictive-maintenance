@@ -464,7 +464,7 @@ class AIAdminDashboard:
         btn_frame.pack(fill=tk.X)
         
         browse_btn = ttk.Button(btn_frame,
-                               text="📂 Browse CSV",
+                               text="📂 Browse File",
                                style='Primary.TButton',
                                command=self.browse_file)
         browse_btn.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=(0, 5))
@@ -560,6 +560,9 @@ class AIAdminDashboard:
         
     def update_model_display(self, data):
         """Update model information display"""
+        # DEBUG: Print what we received
+        print(f"DEBUG update_model_display: {data}")
+        
         is_trained = data.get('is_trained', False)
         
         # Update status badge
@@ -568,8 +571,9 @@ class AIAdminDashboard:
         else:
             self.status_badge.config(text="● Not Trained", fg=self.colors['warning'])
         
-        # Update metrics
-        samples = data.get('training_samples', 0)
+        # Update metrics (API returns 'sample_count')
+        samples = data.get('sample_count', data.get('training_samples', 0))
+        print(f"DEBUG samples value: {samples}")
         self.samples_value.config(text=f"{samples:,}")
         
         last_trained = data.get('last_trained', 'Never')
@@ -581,9 +585,12 @@ class AIAdminDashboard:
                 pass
         self.trained_value.config(text=last_trained)
         
-        params = data.get('model_params', {})
-        self.estimators_value.config(text=str(params.get('n_estimators', 'N/A')))
-        self.contamination_display.config(text=f"{params.get('contamination', 0):.2f}")
+        # Get parameters from root level (API returns them directly)
+        n_est = data.get('n_estimators', 'N/A')
+        cont = data.get('contamination', 0)
+        print(f"DEBUG n_estimators: {n_est}, contamination: {cont}")
+        self.estimators_value.config(text=str(n_est))
+        self.contamination_display.config(text=f"{cont:.2f}" if isinstance(cont, (int, float)) else str(cont))
         
     def train_model(self):
         """Train the AI model"""
@@ -633,8 +640,13 @@ class AIAdminDashboard:
     def browse_file(self):
         """Open file browser"""
         filename = filedialog.askopenfilename(
-            title="Select CSV Dataset",
-            filetypes=[("CSV files", "*.csv"), ("All files", "*.*")]
+            title="Select Dataset File",
+            filetypes=[
+                ("Data files", "*.csv;*.xls;*.xlsx"),
+                ("CSV files", "*.csv"),
+                ("Excel files", "*.xls;*.xlsx"),
+                ("All files", "*.*")
+            ]
         )
         if filename:
             # Show filename only
@@ -643,26 +655,48 @@ class AIAdminDashboard:
             self.selected_file = filename
             
     def upload_dataset(self):
-        """Upload CSV file"""
+        """Upload CSV/Excel file"""
         if not hasattr(self, 'selected_file'):
-            messagebox.showwarning("No File", "Please select a CSV file first")
+            messagebox.showwarning("No File", "Please select a file first")
             return
             
         def upload():
             try:
                 self.update_status("Uploading dataset...")
                 
+                # Detect MIME type based on file extension
+                import os
+                file_ext = os.path.splitext(self.selected_file)[1].lower()
+                mime_types = {
+                    '.csv': 'text/csv',
+                    '.xls': 'application/vnd.ms-excel',
+                    '.xlsx': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+                }
+                mime_type = mime_types.get(file_ext, 'application/octet-stream')
+                
+                print(f"DEBUG: Uploading file: {self.selected_file}")
+                print(f"DEBUG: Extension: {file_ext}, MIME: {mime_type}")
+                
                 with open(self.selected_file, 'rb') as f:
-                    files = {'file': (self.selected_file.split('/')[-1], f, 'text/csv')}
+                    filename = os.path.basename(self.selected_file)
+                    files = {'file': (filename, f, mime_type)}
+                    print(f"DEBUG: Posting to {self.api_url}/upload-dataset")
                     response = requests.post(f"{self.api_url}/upload-dataset", files=files, timeout=60)
+                    print(f"DEBUG: Response status: {response.status_code}")
+                    print(f"DEBUG: Response text: {response.text[:200]}")
+                    response.raise_for_status()
                     result = response.json()
                 
-                rows = result.get('rows_imported', 0)
+                rows = result.get('total_rows', result.get('rows_imported', 0))
                 self.root.after(0, lambda: self.update_status(f"✓ Uploaded {rows} rows"))
                 self.root.after(0, self.refresh_model_info)
+                self.root.after(0, lambda: messagebox.showinfo("Success", f"Dataset uploaded: {rows} rows, {result.get('feature_count', 0)} features"))
                 
-            except Exception as e:
-                self.root.after(0, lambda: self.update_status(f"✗ Upload failed: {str(e)}"))
+            except requests.exceptions.HTTPError as e:
+                error_msg = f"HTTP {e.response.status_code}: {e.response.text[:200]}"
+                print(f"DEBUG ERROR: {error_msg}")
+                self.root.after(0, lambda: self.update_status(f"✗ Upload failed: HTTP {e.response.status_code}"))
+                self.root.after(0, lambda: messagebox.showerror("Upload Error", error_msg))
                 
         threading.Thread(target=upload, daemon=True).start()
         
@@ -949,10 +983,15 @@ if __name__ == "__main__":
         
     def update_model_display(self, data):
         """Update model information display"""
+        # DEBUG: Print what we received
+        print(f"DEBUG update_model_display (second): {data}")
+        
         status = "✅ Trained" if data.get('is_trained') else "⚠️ Not Trained"
         self.status_label.config(text=f"Status: {status}")
         
-        samples = data.get('training_samples', 0)
+        # Get sample count (API returns 'sample_count')
+        samples = data.get('sample_count', data.get('training_samples', 0))
+        print(f"DEBUG samples value: {samples}")
         self.samples_label.config(text=f"Training Samples: {samples:,}")
         
         last_trained = data.get('last_trained', 'Never')
@@ -965,8 +1004,10 @@ if __name__ == "__main__":
                 pass
         self.trained_label.config(text=f"Last Trained: {last_trained}")
         
-        params = data.get('model_params', {})
-        params_text = f"n_estimators={params.get('n_estimators', 'N/A')}, contamination={params.get('contamination', 'N/A')}"
+        # Get parameters from root level (API returns them directly)
+        n_est = data.get('n_estimators', data.get('model_params', {}).get('n_estimators', 'N/A'))
+        cont = data.get('contamination', data.get('model_params', {}).get('contamination', 'N/A'))
+        params_text = f"n_estimators={n_est}, contamination={cont}"
         self.params_label.config(text=f"Parameters: {params_text}")
         
     def train_model(self):
@@ -1021,40 +1062,66 @@ if __name__ == "__main__":
         threading.Thread(target=reset, daemon=True).start()
         
     def browse_file(self):
-        """Open file browser to select CSV file"""
+        """Open file browser to select dataset file"""
         filename = filedialog.askopenfilename(
-            title="Select CSV Dataset",
-            filetypes=[("CSV files", "*.csv"), ("All files", "*.*")]
+            title="Select Dataset File",
+            filetypes=[
+                ("Data files", "*.csv;*.xls;*.xlsx"),
+                ("CSV files", "*.csv"),
+                ("Excel files", "*.xls;*.xlsx"),
+                ("All files", "*.*")
+            ]
         )
         if filename:
             self.file_path_var.set(filename)
             
     def upload_dataset(self):
-        """Upload selected CSV file to AI engine"""
+        """Upload selected CSV/Excel file to AI engine"""
         file_path = self.file_path_var.get()
         if file_path == "No file selected" or not file_path:
-            messagebox.showwarning("No File", "Please select a CSV file first")
+            messagebox.showwarning("No File", "Please select a file first")
             return
             
         def upload():
             try:
                 self.update_status("Uploading dataset...")
                 
+                # Detect MIME type based on file extension
+                import os
+                file_ext = os.path.splitext(file_path)[1].lower()
+                mime_types = {
+                    '.csv': 'text/csv',
+                    '.xls': 'application/vnd.ms-excel',
+                    '.xlsx': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+                }
+                mime_type = mime_types.get(file_ext, 'application/octet-stream')
+                
+                print(f"DEBUG: Uploading file: {file_path}")
+                print(f"DEBUG: Extension: {file_ext}, MIME: {mime_type}")
+                
                 with open(file_path, 'rb') as f:
-                    files = {'file': (file_path.split('/')[-1], f, 'text/csv')}
+                    filename = os.path.basename(file_path)
+                    files = {'file': (filename, f, mime_type)}
+                    print(f"DEBUG: Posting to {self.api_url}/upload-dataset")
                     response = requests.post(f"{self.api_url}/upload-dataset", 
                                            files=files, 
                                            timeout=60)
+                    print(f"DEBUG: Response status: {response.status_code}")
+                    print(f"DEBUG: Response text: {response.text[:200]}")
+                    response.raise_for_status()
                     result = response.json()
                 
-                rows = result.get('rows_imported', 0)
-                self.root.after(0, lambda: self.update_status(f"✅ Dataset uploaded: {rows} rows"))
+                rows = result.get('total_rows', result.get('rows_imported', 0))
+                features = result.get('feature_count', 0)
+                self.root.after(0, lambda: self.update_status(f"✅ Dataset uploaded: {rows} rows, {features} features"))
                 self.root.after(0, self.refresh_model_info)
-                self.root.after(0, lambda: messagebox.showinfo("Success", f"Uploaded {rows} rows successfully!"))
+                self.root.after(0, lambda: messagebox.showinfo("Success", f"Uploaded {rows} rows with {features} features successfully!"))
                 
-            except Exception as e:
-                self.root.after(0, lambda: self.update_status(f"❌ Upload failed: {str(e)}"))
-                self.root.after(0, lambda: messagebox.showerror("Error", f"Upload failed: {str(e)}"))
+            except requests.exceptions.HTTPError as e:
+                error_msg = f"HTTP {e.response.status_code}: {e.response.text[:200]}"
+                print(f"DEBUG ERROR: {error_msg}")
+                self.root.after(0, lambda: self.update_status(f"❌ Upload failed: HTTP {e.response.status_code}"))
+                self.root.after(0, lambda: messagebox.showerror("Upload Error", error_msg))
                 
         threading.Thread(target=upload, daemon=True).start()
         

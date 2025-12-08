@@ -716,44 +716,59 @@ async def health_check():
 
 @app.get("/model-info")
 async def get_model_info():
-    """Get information about the trained model"""
+    """Get information about the trained model and uploaded data"""
     try:
         model_exists = os.path.exists(MODEL_PATH)
+        data_path = "/app/data/training_data.csv"
+        column_mapping_path = "/app/data/column_mapping.json"
+        
+        # Get uploaded data info
+        data_info = {}
+        if os.path.exists(column_mapping_path):
+            with open(column_mapping_path, 'r') as f:
+                data_info = json.load(f)
         
         if not model_exists:
             return {
                 "exists": False,
+                "is_trained": False,
                 "type": None,
                 "n_estimators": None,
                 "contamination": None,
                 "last_trained": None,
-                "sample_count": 0
+                "sample_count": data_info.get('total_rows', 0),
+                "features": data_info.get('original_columns', []),
+                "feature_count": data_info.get('feature_count', 0),
+                "uploaded_file": data_info.get('filename', None)
             }
         
         # Load model to get parameters
         with open(MODEL_PATH, 'rb') as f:
-            model = pickle.load(f)
+            model_data = pickle.load(f)
         
-        # Get training data count
-        sample_count = 0
-        if influx_client:
-            try:
-                query = f'SELECT COUNT(*) FROM {MEASUREMENT}'
-                result = influx_client.query(query)
-                points = list(result.get_points())
-                if points:
-                    sample_count = points[0].get('count_vibration', 0)
-            except:
-                pass
+        # Handle both old and new model formats
+        if isinstance(model_data, dict):
+            model = model_data.get('model')
+            columns = model_data.get('columns', [])
+            trained_at = model_data.get('trained_at')
+        else:
+            # Old format (just the model)
+            model = model_data
+            columns = []
+            trained_at = datetime.fromtimestamp(os.path.getmtime(MODEL_PATH)).isoformat()
         
         # Get model parameters
         params = {
             "exists": True,
+            "is_trained": True,
             "type": type(model).__name__,
             "n_estimators": getattr(model, 'n_estimators', None),
             "contamination": getattr(model, 'contamination', None),
-            "last_trained": datetime.fromtimestamp(os.path.getmtime(MODEL_PATH)).isoformat(),
-            "sample_count": sample_count
+            "last_trained": trained_at,
+            "sample_count": data_info.get('total_rows', 0),
+            "features": columns or data_info.get('original_columns', []),
+            "feature_count": len(columns) or data_info.get('feature_count', 0),
+            "uploaded_file": data_info.get('filename', None)
         }
         
         return params
@@ -764,35 +779,44 @@ async def get_model_info():
 
 @app.post("/train")
 async def train_model(request: TrainRequest):
-    """Train or retrain the anomaly detection model"""
+    """Train or retrain the anomaly detection model with uploaded data"""
     try:
         from sklearn.ensemble import IsolationForest
+        from sklearn.preprocessing import StandardScaler
+        import pandas as pd
         import numpy as np
         
-        if not influx_client:
-            raise HTTPException(status_code=503, detail="InfluxDB not available")
+        # Check for uploaded training data
+        data_path = "/app/data/training_data.csv"
+        column_mapping_path = "/app/data/column_mapping.json"
         
-        # Fetch training data
-        query = f'SELECT * FROM {MEASUREMENT} LIMIT 10000'
-        result = influx_client.query(query)
-        points = list(result.get_points())
-        
-        if len(points) < 100:
+        if not os.path.exists(data_path):
             raise HTTPException(
                 status_code=400,
-                detail=f"Insufficient training data. Need at least 100 samples, got {len(points)}"
+                detail="No training data found. Please upload a dataset first using the Dataset Upload feature."
             )
         
-        # Prepare features
-        features = []
-        for point in points:
-            features.append([
-                point.get('vibration', 0),
-                point.get('temperature', 0),
-                point.get('pressure', 0)
-            ])
+        # Load uploaded data
+        df = pd.read_csv(data_path)
         
-        X = np.array(features)
+        if len(df) < 100:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Insufficient training data. Need at least 100 samples, got {len(df)}"
+            )
+        
+        # Load column info
+        column_info = {}
+        if os.path.exists(column_mapping_path):
+            with open(column_mapping_path, 'r') as f:
+                column_info = json.load(f)
+        
+        # Prepare features (all numeric columns)
+        X = df.values
+        
+        # Normalize features
+        scaler = StandardScaler()
+        X_scaled = scaler.fit_transform(X)
         
         # Train model
         model = IsolationForest(
@@ -802,19 +826,31 @@ async def train_model(request: TrainRequest):
             n_jobs=-1
         )
         
-        model.fit(X)
+        model.fit(X_scaled)
         
-        # Save model
+        # Save model and scaler
         os.makedirs(os.path.dirname(MODEL_PATH), exist_ok=True)
+        
+        model_data = {
+            'model': model,
+            'scaler': scaler,
+            'columns': df.columns.tolist(),
+            'feature_count': len(df.columns),
+            'trained_at': datetime.utcnow().isoformat()
+        }
+        
         with open(MODEL_PATH, 'wb') as f:
-            pickle.dump(model, f)
+            pickle.dump(model_data, f)
         
         return {
             "message": "Model trained successfully",
-            "samples_used": len(points),
+            "samples_used": len(df),
+            "features": df.columns.tolist(),
+            "feature_count": len(df.columns),
             "n_estimators": request.n_estimators,
             "contamination": request.contamination,
-            "model_path": MODEL_PATH
+            "model_path": MODEL_PATH,
+            "source_file": column_info.get('filename', 'unknown')
         }
         
     except HTTPException:
@@ -838,64 +874,106 @@ async def reset_model():
 
 @app.post("/upload-dataset")
 async def upload_dataset(file: UploadFile = File(...)):
-    """Upload CSV dataset and insert into InfluxDB for training"""
+    """Upload CSV/Excel dataset - auto-detects columns and file format"""
     try:
+        import pandas as pd
+        
+        print(f"📥 Upload request received: {file.filename}, content_type: {file.content_type}")
+        
         # Validate file type
-        if not file.filename.endswith('.csv'):
-            raise HTTPException(status_code=400, detail="Only CSV files are allowed")
+        allowed_extensions = ['.csv', '.xls', '.xlsx']
+        file_ext = os.path.splitext(file.filename)[1].lower()
+        
+        print(f"🔍 Detected file extension: {file_ext}")
+        
+        if file_ext not in allowed_extensions:
+            error_msg = f"File type not supported. Allowed: {', '.join(allowed_extensions)}"
+            print(f"❌ {error_msg}")
+            raise HTTPException(
+                status_code=400, 
+                detail=error_msg
+            )
         
         # Read file content
         contents = await file.read()
-        csv_data = contents.decode('utf-8')
+        print(f"📦 File size: {len(contents)} bytes")
         
-        # Parse CSV
-        csv_reader = csv.DictReader(io.StringIO(csv_data))
-        rows = list(csv_reader)
+        # Load data based on file type
+        try:
+            if file_ext == '.csv':
+                # Try to auto-detect delimiter (comma or semicolon)
+                df = pd.read_csv(io.BytesIO(contents), sep=None, engine='python')
+            elif file_ext in ['.xls', '.xlsx']:
+                df = pd.read_excel(io.BytesIO(contents))
+            print(f"✅ Parsed {len(df)} rows, {len(df.columns)} columns: {df.columns.tolist()}")
+        except Exception as e:
+            error_msg = f"Failed to parse file: {str(e)}"
+            print(f"❌ {error_msg}")
+            raise HTTPException(status_code=400, detail=error_msg)
         
-        if not rows:
-            raise HTTPException(status_code=400, detail="CSV file is empty")
+        if df.empty:
+            raise HTTPException(status_code=400, detail="File contains no data")
         
-        # Validate required columns
-        required_columns = {'vibration', 'temperature', 'pressure'}
-        if not required_columns.issubset(set(rows[0].keys())):
+        # Auto-detect numeric columns (features)
+        numeric_cols = df.select_dtypes(include=['int64', 'float64', 'int32', 'float32']).columns.tolist()
+        
+        if not numeric_cols:
             raise HTTPException(
                 status_code=400, 
-                detail=f"CSV must contain columns: {', '.join(required_columns)}"
+                detail="No numeric columns found. File must contain at least one numeric column."
             )
         
-        # Insert data into InfluxDB
+        # Handle missing values
+        df_clean = df[numeric_cols].fillna(df[numeric_cols].mean())
+        
+        # Store column mapping for later use
+        column_mapping_path = "/app/data/column_mapping.json"
+        os.makedirs(os.path.dirname(column_mapping_path), exist_ok=True)
+        
+        column_info = {
+            "original_columns": numeric_cols,
+            "feature_count": len(numeric_cols),
+            "uploaded_at": datetime.utcnow().isoformat(),
+            "filename": file.filename,
+            "total_rows": len(df_clean)
+        }
+        
+        with open(column_mapping_path, 'w') as f:
+            json.dump(column_info, f, indent=2)
+        
+        # Save processed data for training
+        data_path = "/app/data/training_data.csv"
+        df_clean.to_csv(data_path, index=False)
+        
+        # Also insert into InfluxDB for visualization
         points = []
-        for row in rows:
+        for idx, row in df_clean.iterrows():
+            fields = {col: float(row[col]) for col in numeric_cols}
+            
+            point = {
+                "measurement": MEASUREMENT,
+                "tags": {
+                    "source": "uploaded_dataset",
+                    "filename": file.filename
+                },
+                "time": datetime.utcnow().isoformat(),
+                "fields": fields
+            }
+            points.append(point)
+        
+        if influx_client and points:
             try:
-                point = {
-                    "measurement": MEASUREMENT,
-                    "tags": {
-                        "machine_id": row.get('machine_id', 'uploaded'),
-                        "source": "csv_upload"
-                    },
-                    "time": row.get('timestamp', datetime.utcnow().isoformat()),
-                    "fields": {
-                        "vibration": float(row['vibration']),
-                        "temperature": float(row['temperature']),
-                        "pressure": float(row['pressure']),
-                        "status": row.get('status', 'NORMAL')
-                    }
-                }
-                points.append(point)
-            except (ValueError, KeyError) as e:
-                # Skip invalid rows
-                continue
-        
-        if not points:
-            raise HTTPException(status_code=400, detail="No valid data rows found in CSV")
-        
-        # Write to InfluxDB
-        influx_client.write_points(points)
+                influx_client.write_points(points[:1000])  # Limit to first 1000 points for visualization
+            except Exception as e:
+                print(f"Warning: Could not write to InfluxDB: {e}")
         
         return {
-            "message": f"Dataset uploaded successfully",
-            "rows_imported": len(points),
-            "filename": file.filename
+            "message": "Dataset uploaded and processed successfully",
+            "filename": file.filename,
+            "total_rows": len(df_clean),
+            "numeric_columns": numeric_cols,
+            "feature_count": len(numeric_cols),
+            "ready_for_training": True
         }
         
     except HTTPException:

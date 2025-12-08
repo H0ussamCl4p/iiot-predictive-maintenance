@@ -48,7 +48,8 @@ class ModelStatusSection:
         is_trained = data.get('is_trained', False)
         self.status_badge.set_status(is_trained)
         
-        samples = data.get('training_samples', 0)
+        # API returns 'sample_count', not 'training_samples'
+        samples = data.get('sample_count', data.get('training_samples', 0))
         self.samples.set_value(f"{samples:,}")
         
         last_trained = data.get('last_trained', 'Never')
@@ -60,9 +61,11 @@ class ModelStatusSection:
                 pass
         self.last_trained.set_value(last_trained)
         
-        params = data.get('model_params', {})
-        self.n_estimators.set_value(str(params.get('n_estimators', 'N/A')))
-        self.contamination.set_value(f"{params.get('contamination', 0):.2f}")
+        # API returns parameters at root level, not in model_params
+        n_est = data.get('n_estimators', 'N/A')
+        cont = data.get('contamination', 0)
+        self.n_estimators.set_value(str(n_est))
+        self.contamination.set_value(f"{cont:.2f}" if isinstance(cont, (int, float)) else "0.00")
 
 
 class QuickActionsSection:
@@ -198,7 +201,7 @@ class DatasetUploadSection:
         
         ttk.Button(
             btn_frame,
-            text="📂 Browse CSV",
+            text="📂 Browse File",
             style='Primary.TButton',
             command=self.browse_file
         ).pack(side=tk.LEFT, fill=tk.X, expand=True, padx=(0, 5))
@@ -213,8 +216,13 @@ class DatasetUploadSection:
     def browse_file(self):
         """Open file browser"""
         filename = filedialog.askopenfilename(
-            title="Select CSV Dataset",
-            filetypes=[("CSV files", "*.csv"), ("All files", "*.*")]
+            title="Select Dataset File",
+            filetypes=[
+                ("Data files", "*.csv;*.xls;*.xlsx"),
+                ("CSV files", "*.csv"),
+                ("Excel files", "*.xls;*.xlsx"),
+                ("All files", "*.*")
+            ]
         )
         if filename:
             display_name = filename.split('/')[-1].split('\\')[-1]

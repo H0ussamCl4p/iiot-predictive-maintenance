@@ -4,3 +4,5 @@ influxdb==5.3.1
 paho-mqtt==1.6.1
 python-multipart==0.0.6
 supervisor==4.2.5
+openpyxl==3.1.2
+xlrd==2.0.1

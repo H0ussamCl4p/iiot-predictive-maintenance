@@ -65,11 +65,22 @@ class AIEngineClient:
         threading.Thread(target=reset, daemon=True).start()
     
     def upload_dataset(self, file_path: str, callback: Callable, error_callback: Optional[Callable] = None):
-        """Upload CSV dataset asynchronously"""
+        """Upload CSV/Excel dataset asynchronously"""
         def upload():
             try:
+                # Detect MIME type based on file extension
+                import os
+                file_ext = os.path.splitext(file_path)[1].lower()
+                mime_types = {
+                    '.csv': 'text/csv',
+                    '.xls': 'application/vnd.ms-excel',
+                    '.xlsx': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+                }
+                mime_type = mime_types.get(file_ext, 'application/octet-stream')
+                
                 with open(file_path, 'rb') as f:
-                    files = {'file': (file_path.split('/')[-1].split('\\')[-1], f, 'text/csv')}
+                    filename = os.path.basename(file_path)
+                    files = {'file': (filename, f, mime_type)}
                     response = requests.post(
                         f"{self.base_url}/upload-dataset",
                         files=files,

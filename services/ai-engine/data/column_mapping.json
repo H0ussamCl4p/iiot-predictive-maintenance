@@ -1,0 +1,14 @@
+{
+  "original_columns": [
+    "\ufeffUID",
+    "Humidity",
+    "Temperature",
+    "Age",
+    "Quantity",
+    "MTTF "
+  ],
+  "feature_count": 6,
+  "uploaded_at": "2025-12-08T14:32:50.480292",
+  "filename": "PM DATA Training.csv",
+  "total_rows": 5000
+}
