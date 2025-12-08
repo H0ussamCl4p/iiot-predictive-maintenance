@@ -241,7 +241,7 @@ export default function DashboardPage() {
                 <span className="text-xs text-emerald-500 font-medium">LIVE</span>
               </div>
             </div>
-            <div className="h-64 sm:h-80">
+            <div className="h-64 sm:h-80 min-h-[256px]">
               {historyData && historyData.length > 0 ? (
                 <LiveChart data={historyData} />
               ) : (

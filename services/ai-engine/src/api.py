@@ -599,16 +599,18 @@ async def get_anomaly_patterns():
         
         # Pattern 1: Time-based vibration analysis
         if points and len(points) > 24:
-            vibration_values = [float(p.get('avg_vibration', 0)) for p in points if p.get('avg_vibration')]
+            vibration_values = [float(p['avg_vibration']) for p in points if p.get('avg_vibration') is not None]
             avg_vibration = sum(vibration_values) / len(vibration_values) if vibration_values else 0
             
             # Find peaks (hours with significantly higher vibration)
             high_vibration_hours = []
             for i, point in enumerate(points[-24:]):  # Last 24 hours
-                vib = float(point.get('avg_vibration', 0))
-                if vib > avg_vibration * 1.2:  # 20% above average
-                    hour = i % 24
-                    high_vibration_hours.append(hour)
+                vib_val = point.get('avg_vibration')
+                if vib_val is not None:
+                    vib = float(vib_val)
+                    if vib > avg_vibration * 1.2:  # 20% above average
+                        hour = i % 24
+                        high_vibration_hours.append(hour)
             
             if high_vibration_hours:
                 most_common_hour = max(set(high_vibration_hours), key=high_vibration_hours.count)
@@ -630,10 +632,13 @@ async def get_anomaly_patterns():
         if points:
             temp_vib_correlation = []
             for point in points[-50:]:  # Last 50 readings
-                temp = float(point.get('avg_temperature', 0))
-                vib = float(point.get('avg_vibration', 0))
-                if temp > 70 and vib > 75:
-                    temp_vib_correlation.append((temp, vib))
+                temp_val = point.get('avg_temperature')
+                vib_val = point.get('avg_vibration')
+                if temp_val is not None and vib_val is not None:
+                    temp = float(temp_val)
+                    vib = float(vib_val)
+                    if temp > 70 and vib > 75:
+                        temp_vib_correlation.append((temp, vib))
             
             if len(temp_vib_correlation) > 5:
                 correlation_strength = len(temp_vib_correlation) / min(50, len(points)) * 100
@@ -663,11 +668,11 @@ async def get_anomaly_patterns():
         weekday_points = list(weekday_result.get_points())
         
         if len(weekday_points) >= 7:
-            day_vibrations = [(i % 7, float(p.get('avg_vibration', 0))) for i, p in enumerate(weekday_points)]
+            day_vibrations = [(i % 7, float(p['avg_vibration'])) for i, p in enumerate(weekday_points) if p.get('avg_vibration') is not None]
             day_names = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday']
             
             # Find day with highest average vibration
-            if day_vibrations:
+            if day_vibrations and len(day_vibrations) > 0:
                 max_day_idx = max(day_vibrations, key=lambda x: x[1])[0]
                 max_day_value = max(day_vibrations, key=lambda x: x[1])[1]
                 avg_all_days = sum(v for _, v in day_vibrations) / len(day_vibrations)

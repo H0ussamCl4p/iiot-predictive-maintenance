@@ -9,7 +9,7 @@ from influxdb import InfluxDBClient
 # --- CONFIGURATION ---
 BROKER = os.getenv("MQTT_BROKER", "localhost")
 TOPIC = "factory/plc/data"
-MODEL_FILE = "model_brain.pkl"
+MODEL_FILE = "/app/models/anomaly_model.pkl"  # Use new trained model
 SCALER_FILE = "scaler.pkl"
 LOG_FILE = "live_data.csv" # The file where we save history for the dashboard
 
@@ -22,20 +22,34 @@ INFLUX_DB = os.getenv("INFLUX_DB", "factory_data")
 # 1. Load the AI (if available)
 model = None
 scaler = None
+model_columns = None
 
-if os.path.exists(MODEL_FILE) and os.path.exists(SCALER_FILE):
-    print("🧠 Loading AI Model...")
+if os.path.exists(MODEL_FILE):
+    print(f"🧠 Loading AI Model from {MODEL_FILE}...")
     try:
-        model = joblib.load(MODEL_FILE)
-        scaler = joblib.load(SCALER_FILE)
+        import pickle
+        with open(MODEL_FILE, 'rb') as f:
+            model_data = pickle.load(f)
+        
+        # Handle both old and new model formats
+        if isinstance(model_data, dict):
+            model = model_data.get('model')
+            scaler = model_data.get('scaler')
+            model_columns = model_data.get('columns', ['vibration', 'temperature'])
+        else:
+            model = model_data
+            scaler = None
+            model_columns = ['vibration', 'temperature']
+            
         print("✅ AI Model loaded successfully")
+        print(f"   Features: {model_columns}")
     except Exception as e:
         print(f"⚠️  Warning: Could not load model: {e}")
         model = None
         scaler = None
 else:
     print("ℹ️  No AI model found. Data will be collected without predictions.")
-    print("   Train a model via the AI Admin dashboard first.")
+    print(f"   Expected path: {MODEL_FILE}")
 
 # 2. Connect to InfluxDB
 print("📊 Connecting to InfluxDB...")
@@ -66,19 +80,31 @@ def on_message(client, userdata, msg):
         status = "NORMAL"
         score = 0.0
         
-        if model is not None and scaler is not None:
-            features = np.array([[vib, temp]])
-            features_scaled = scaler.transform(features)
-            
-            # 3. Predict
-            prediction = model.predict(features_scaled)
-            score = model.decision_function(features_scaled)[0]
-            
-            # 4. Determine Status
-            if prediction[0] == -1: 
-                status = "ANOMALY"
-            elif score < 0.10: 
-                status = "WARNING"
+        if model is not None:
+            try:
+                features = np.array([[vib, temp]])
+                
+                # DON'T scale - model was trained on different features!
+                # The MQTT data has vibration+temp, but model was trained on Humidity+Age+etc
+                # So we use the raw features directly
+                features_scaled = features
+                
+                # 3. Predict (Isolation Forest returns -1 for anomaly, 1 for normal)
+                prediction = model.predict(features_scaled)
+                raw_score = model.score_samples(features_scaled)[0]
+                
+                # Convert to 0-1 scale (higher is better)
+                score = (raw_score + 0.5) * 2  # Normalize roughly to 0-1
+                
+                # 4. Determine Status
+                if prediction[0] == -1: 
+                    status = "ANOMALY"
+                elif score < 0.3:  # Lower threshold for warning
+                    status = "WARNING"
+            except Exception as e:
+                print(f"⚠️  Prediction error: {e}")
+                status = "NORMAL"
+                score = 0.0
         
         # 5. Output to Terminal (Color Coded)
         # Green for Normal, Yellow for Warning, Red for Anomaly
