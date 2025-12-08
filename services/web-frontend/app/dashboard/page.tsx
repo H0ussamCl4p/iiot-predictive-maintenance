@@ -17,6 +17,7 @@ import HealthScoreCard from '@/components/HealthScoreCard'
 import WorkOrderList from '@/components/WorkOrderList'
 import PatternAnalysis from '@/components/PatternAnalysis'
 import MobileMenu from '@/components/MobileMenu'
+import PredictionPanel from '@/components/PredictionPanel'
 import type { LiveData, HistoricalData, Statistics, Alert, WorkOrder, AnomalyPattern } from '@/types'
 
 const fetcher = (url: string) => fetch(url).then(res => res.json())
@@ -223,6 +224,9 @@ export default function DashboardPage() {
             />
           </div>
         </div>
+
+        {/* AI Prediction Panel */}
+        <PredictionPanel />
 
         {/* Chart Section */}
         <div className="grid grid-cols-1 gap-3 sm:gap-4 lg:gap-6">
