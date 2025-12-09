@@ -49,6 +49,61 @@ services:
       retries: 3
       start_period: 10s
 
+  # PostgreSQL Database for User Management
+  postgres:
+    image: postgres:16-alpine
+    container_name: iiot_postgres
+    ports:
+      - "5432:5432"
+    environment:
+      - POSTGRES_DB=iiot_users
+      - POSTGRES_USER=iiot_admin
+      - POSTGRES_PASSWORD=iiot_db_pass_123
+    volumes:
+      - ./infrastructure/postgres/data:/var/lib/postgresql/data
+    networks:
+      - iiot_net
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U iiot_admin -d iiot_users"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+
+  # ==========================================
+  # AUTHENTICATION SERVICE
+  # ==========================================
+  
+  auth-service:
+    build:
+      context: ./services/auth-service
+      dockerfile: Dockerfile
+      args:
+        BUILDKIT_INLINE_CACHE: 1
+    container_name: iiot_auth_service
+    ports:
+      - "8001:8001"
+    environment:
+      - JWT_SECRET_KEY=${JWT_SECRET_KEY:-your-secret-key-change-in-production}
+      - ACCESS_TOKEN_EXPIRE_MINUTES=${ACCESS_TOKEN_EXPIRE_MINUTES:-60}
+      - DATABASE_URL=postgresql://iiot_admin:iiot_db_pass_123@postgres:5432/iiot_users
+      - PYTHONUNBUFFERED=1
+    volumes:
+      - ./services/auth-service/src:/app/src
+    networks:
+      - iiot_net
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8001/health"]
+      interval: 10s
+      timeout: 3s
+      retries: 2
+      start_period: 10s
+
   # ==========================================
   # AI ENGINE SERVICE (Brain)
   # ==========================================
@@ -69,6 +124,8 @@ services:
       - MQTT_BROKER=mosquitto
       - MQTT_PORT=1883
       - PYTHONUNBUFFERED=1
+      - JWT_SECRET_KEY=${JWT_SECRET_KEY:-your-secret-key-change-in-production}
+      - ACCESS_TOKEN_EXPIRE_MINUTES=${ACCESS_TOKEN_EXPIRE_MINUTES:-60}
     volumes:
       - ./services/ai-engine/src:/app/src
       - ./services/ai-engine/models:/app/models
@@ -125,15 +182,14 @@ services:
       - "3001:3000"
     environment:
       - NEXT_PUBLIC_API_URL=http://localhost:8000
+      - NEXT_PUBLIC_AUTH_URL=http://localhost:8001
       - AI_ENGINE_URL=http://ai-engine:8000
-      - NEXTAUTH_URL=http://localhost:3001
-      - NEXTAUTH_SECRET=${NEXTAUTH_SECRET}
-      - GOOGLE_CLIENT_ID=${GOOGLE_CLIENT_ID}
-      - GOOGLE_CLIENT_SECRET=${GOOGLE_CLIENT_SECRET}
+      - AUTH_SERVICE_URL=http://auth-service:8001
     networks:
       - iiot_net
     depends_on:
       - ai-engine
+      - auth-service
     restart: unless-stopped
 
   # ==========================================

@@ -3,14 +3,12 @@
 'use client'
 
 import { useEffect, useState } from 'react'
-import { useSession } from 'next-auth/react'
 import { useRouter } from 'next/navigation'
 import Link from 'next/link'
 
 // Overview page: simple welcome only, no data fetching
 
 export default function DashboardPage() {
-  const { data: session, status } = useSession()
   const router = useRouter()
   const [mounted, setMounted] = useState(false)
 
@@ -19,14 +17,18 @@ export default function DashboardPage() {
     setMounted(true)
   }, [])
 
-  // Redirect to login if not authenticated
   useEffect(() => {
-    if (status === 'unauthenticated') {
-      router.push('/login')
-    }
-  }, [status, router])
+    if (!mounted) return
 
-  if (!mounted || status === 'loading') {
+    if (typeof window !== 'undefined') {
+      const token = window.localStorage.getItem('token')
+      if (!token) {
+        router.push('/login')
+      }
+    }
+  }, [mounted, router])
+
+  if (!mounted) {
     return (
       <div className="min-h-screen bg-slate-950 flex items-center justify-center">
         <div className="text-center">
@@ -36,11 +38,6 @@ export default function DashboardPage() {
       </div>
     )
   }
-
-  if (status === 'unauthenticated') {
-    return null
-  }
-
   // No error state needed; no data on this page
 
   return (

@@ -1,6 +1,5 @@
 "use client"
 
-import { useSession, signOut } from "next-auth/react"
 import { useEffect, useState } from "react"
 import { Activity, LogOut } from "lucide-react"
 import StatusBadge from "@/components/StatusBadge"
@@ -8,11 +7,23 @@ import MobileMenu from "@/components/MobileMenu"
 import DashboardNav from "@/components/DashboardNav"
 
 export default function DashboardLayout({ children }: { children: React.ReactNode }) {
-  const { data: session, status } = useSession()
   const [mounted, setMounted] = useState(false)
+  const [userName, setUserName] = useState<string | null>(null)
   useEffect(() => setMounted(true), [])
 
-  if (!mounted || status === 'loading') {
+  useEffect(() => {
+    const storedUser = typeof window !== 'undefined' ? window.localStorage.getItem('user') : null
+    if (storedUser) {
+      try {
+        const parsed = JSON.parse(storedUser)
+        setUserName(parsed.name || parsed.email || null)
+      } catch {
+        setUserName(null)
+      }
+    }
+  }, [])
+
+  if (!mounted) {
     return (
       <div className="min-h-screen bg-slate-950 flex items-center justify-center">
         <div className="text-center">
@@ -41,10 +52,16 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
               <div className="flex items-center gap-2 sm:gap-3">
                 <div className="text-right hidden lg:block">
                   <p className="text-xs text-slate-400">Logged in as</p>
-                  <p className="text-sm font-medium text-white truncate max-w-[150px]">{session?.user?.name || session?.user?.email || 'User'}</p>
+                  <p className="text-sm font-medium text-white truncate max-w-[150px]">{userName || 'User'}</p>
                 </div>
                 <button
-                  onClick={() => signOut({ callbackUrl: '/' })}
+                  onClick={() => {
+                    if (typeof window !== 'undefined') {
+                      window.localStorage.removeItem('token')
+                      window.localStorage.removeItem('user')
+                    }
+                    window.location.href = '/'
+                  }}
                   className="p-2 text-slate-400 hover:text-white hover:bg-slate-800 rounded-lg transition-colors"
                   title="Sign out"
                 >

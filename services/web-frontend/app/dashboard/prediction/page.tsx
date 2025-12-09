@@ -3,31 +3,42 @@
 import { useState } from 'react'
 import useSWR from 'swr'
 import PredictionPanel from '@/components/PredictionPanel'
+import RULPrediction from '@/components/RULPrediction'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 
 const fetcher = (url: string) => fetch(url).then(res => res.json())
 
 export default function PredictionPage() {
-  const [equipmentId, setEquipmentId] = useState<string>('all')
-  const { data: equipment } = useSWR<any[]>('http://localhost:8000/api/equipment', fetcher, { refreshInterval: 60000 })
+  const [machineId, setMachineId] = useState<string>('MACHINE_002')
+  const { data: machines } = useSWR<any[]>('http://localhost:8000/api/machines', fetcher, { refreshInterval: 10000 })
+  
   return (
     <div className="space-y-6">
-      {/* Equipment Selector */}
+      {/* Machine Selector */}
       <div className="flex items-center gap-3">
-        <label className="text-slate-400 text-sm">Equipment:</label>
-        <Select value={equipmentId} onValueChange={setEquipmentId}>
-          <SelectTrigger className="w-[200px] bg-slate-900/60 border-slate-800 text-white">
-            <SelectValue placeholder="All Equipment" />
+        <label className="text-slate-400 text-sm">Machine:</label>
+        <Select value={machineId} onValueChange={setMachineId}>
+          <SelectTrigger className="w-[280px] bg-slate-900/60 border-slate-800 text-white">
+            <SelectValue placeholder="Select Machine" />
           </SelectTrigger>
           <SelectContent className="bg-slate-900 border-slate-800">
-            <SelectItem value="all" className="text-white hover:bg-slate-800">All Equipment</SelectItem>
-            {(equipment || []).map((eq) => (
-              <SelectItem key={eq.id} value={eq.id} className="text-white hover:bg-slate-800">{eq.id}</SelectItem>
+            {(machines || [
+              { machine_id: 'MACHINE_002', name: 'Conveyor Belt' },
+              { machine_id: 'MACHINE_003', name: 'Industrial Motor' }
+            ]).map((machine) => (
+              <SelectItem key={machine.machine_id} value={machine.machine_id} className="text-white hover:bg-slate-800">
+                {machine.machine_id} - {machine.machine_id}
+              </SelectItem>
             ))}
           </SelectContent>
         </Select>
       </div>
-      <PredictionPanel equipmentId={equipmentId !== 'all' ? equipmentId : undefined} />
+      
+      {/* RUL Prediction for Selected Machine */}
+      <RULPrediction machineId={machineId} />
+      
+      {/* AI Prediction Panel */}
+      <PredictionPanel equipmentId={machineId} />
     </div>
   )
 }

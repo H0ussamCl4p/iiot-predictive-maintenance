@@ -3,6 +3,7 @@
 import useSWR from 'swr'
 import { Card, CardHeader, CardTitle, CardDescription, CardContent } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
+import AddEquipmentDialog from '@/components/AddEquipmentDialog'
 
 type Equipment = {
   id: string
@@ -13,9 +14,8 @@ type Equipment = {
 }
 
 const sampleEquipment: Equipment[] = [
-  { id: 'PRESS_001', name: 'Hydraulic Press', type: 'Press', status: 'ONLINE', location: 'Line A' },
-  { id: 'CONV_014', name: 'Main Conveyor', type: 'Conveyor', status: 'MAINTENANCE', location: 'Dock' },
-  { id: 'MOTOR_207', name: 'Cooling Motor', type: 'Motor', status: 'OFFLINE', location: 'Utility' },
+  { id: 'MACHINE_002', name: 'Conveyor Belt', type: 'Conveyor', status: 'ONLINE', location: 'Line A' },
+  { id: 'MACHINE_003', name: 'Industrial Motor', type: 'Motor', status: 'ONLINE', location: 'Line B' },
 ]
 
 function StatusBadge({ status }: { status: Equipment['status'] }) {
@@ -41,8 +41,13 @@ export default function EquipmentPage() {
     <div className="grid grid-cols-1 gap-4">
       <Card>
         <CardHeader>
-          <CardTitle>Equipment</CardTitle>
-          <CardDescription>Registered assets and current status</CardDescription>
+          <div className="flex items-center justify-between">
+            <div>
+              <CardTitle>Equipment</CardTitle>
+              <CardDescription>Registered assets and current status</CardDescription>
+            </div>
+            <AddEquipmentDialog onSuccess={() => {}} />
+          </div>
         </CardHeader>
         <CardContent>
           <div className="overflow-x-auto">

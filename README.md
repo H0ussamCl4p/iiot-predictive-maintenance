@@ -1,11 +1,50 @@
-# Predictive Maintenance
+# IIoT Predictive Maintenance Dashboard
 
 ## Overview
-This project provides an IIoT predictive maintenance stack with:
-- FastAPI backend serving live data, history, stats, alerts, and pattern analysis
-- Next.js dashboard with AI Health Score trend and prediction panel
-- MQTT simulator feeding vibration and temperature into InfluxDB
-- Optional desktop Tkinter admin
+Enterprise-grade IIoT predictive maintenance system with:
+- **JWT Authentication** - Secure token-based login with PostgreSQL user storage
+- **Microservice Architecture** - Dedicated auth-service, ai-engine, and web-frontend
+- **FastAPI Backend** - Real-time API with anomaly detection
+- **Next.js Dashboard** - Modern UI with AI-powered insights
+- **MQTT Integration** - ESP32/PLC equipment support
+- **InfluxDB Time Series** - High-performance sensor data storage
+- **Role-Based Access Control** - Admin & Operator roles
+
+## 🚀 Quick Start
+
+### Prerequisites
+- Docker & Docker Compose
+- Port availability: 3001, 8000, 8001, 5432, 8086, 1883
+
+### Setup (5 minutes)
+
+1. **Start Services**:
+   ```powershell
+   docker compose up -d --build
+   ```
+
+2. **Access Dashboard**:
+   ```powershell
+   # Login page
+   Start-Process http://localhost:3001/login
+   
+   # Login with default credentials, then access:
+   Start-Process http://localhost:3001/dashboard
+   ```
+
+## 🔐 Authentication
+
+### JWT with PostgreSQL
+- Token-based authentication via dedicated auth-service
+- User data persists in PostgreSQL database
+- Bcrypt password hashing
+- No external OAuth dependencies
+
+### Default Accounts
+- Username: `admin` / Password: `admin123` (admin role)
+- Username: `operator` / Password: `operator123` (operator role)
+
+**⚠️ Change passwords in production!**
 
 ## Backend API
 - `GET /api/live`: Latest telemetry and AI assessment.

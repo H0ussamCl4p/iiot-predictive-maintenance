@@ -3,12 +3,14 @@ FastAPI Backend Server for IIoT Predictive Maintenance
 Provides REST API endpoints for Next.js frontend
 """
 
-from fastapi import FastAPI, HTTPException, UploadFile, File
+from fastapi import FastAPI, HTTPException, UploadFile, File, Depends
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import Response
+from fastapi.security import HTTPBearer
 from pydantic import BaseModel
 from influxdb import InfluxDBClient
 from typing import List, Dict, Any, Optional
-from datetime import datetime
+from datetime import datetime, timedelta
 import uvicorn
 import os
 import json
@@ -18,6 +20,19 @@ import io
 import numpy as np
 from sklearn.preprocessing import StandardScaler
 from sklearn.ensemble import RandomForestRegressor
+from reportlab.lib.pagesizes import letter, A4
+from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+from reportlab.lib.units import inch
+from reportlab.lib.enums import TA_CENTER, TA_LEFT, TA_JUSTIFY
+from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle, PageBreak
+from reportlab.lib import colors
+from reportlab.pdfgen import canvas
+
+# Import authentication (token validation only)
+from src.auth import (
+    get_current_user,
+    get_current_active_admin,
+)
 
 # Configuration
 INFLUX_HOST = os.getenv("INFLUX_HOST", "localhost")
@@ -126,12 +141,153 @@ except Exception as e:
     print(f"⚠️  Warning: Could not connect to InfluxDB: {e}")
     influx_client = None
 
+# -----------------------------
+# Note: Authentication endpoints moved to auth-service
+# This service only validates JWT tokens for protected endpoints
+# -----------------------------
+
 
 # Pydantic models for request bodies
 class TrainRequest(BaseModel):
     n_estimators: Optional[int] = 100
     contamination: Optional[float] = 0.1
     random_state: Optional[int] = 42
+
+class MaintenanceTaskCreate(BaseModel):
+    equipmentId: str
+    title: str
+    description: str
+    dueDate: str
+    priority: str  # LOW, MEDIUM, HIGH
+    anomalyId: Optional[str] = None
+    aiDetectedCause: Optional[str] = None
+    urgency: Optional[str] = None  # URGENT, NOT_URGENT
+    importance: Optional[str] = None  # IMPORTANT, NOT_IMPORTANT
+
+class MaintenanceTaskUpdate(BaseModel):
+    status: Optional[str] = None  # NOT_STARTED, IN_PROGRESS, DONE
+    assignedTo: Optional[str] = None
+    completedBy: Optional[str] = None
+    completionNotes: Optional[str] = None
+    completedAt: Optional[str] = None
+
+
+def classify_eisenhower_matrix(priority: str, days_until_due: int, has_anomaly: bool) -> tuple[str, str, int]:
+    """
+    Classify task using Eisenhower Matrix and assign priority order
+    Returns: (urgency, importance, order_priority)
+    
+    Quadrants:
+    1. DO FIRST (Urgent + Important) - order 1
+    2. SCHEDULE (Not Urgent + Important) - order 2
+    3. DELEGATE (Urgent + Not Important) - order 3
+    4. ELIMINATE (Not Urgent + Not Important) - order 4
+    """
+    # Determine urgency based on due date
+    if days_until_due <= 2 or priority == "HIGH":
+        urgency = "URGENT"
+    else:
+        urgency = "NOT_URGENT"
+    
+    # Determine importance based on anomaly detection and priority
+    if has_anomaly or priority in ["HIGH", "MEDIUM"]:
+        importance = "IMPORTANT"
+    else:
+        importance = "NOT_IMPORTANT"
+    
+    # Assign order priority based on quadrant
+    if urgency == "URGENT" and importance == "IMPORTANT":
+        order_priority = 1  # DO FIRST
+        quadrant = "DO_FIRST"
+    elif urgency == "NOT_URGENT" and importance == "IMPORTANT":
+        order_priority = 2  # SCHEDULE
+        quadrant = "SCHEDULE"
+    elif urgency == "URGENT" and importance == "NOT_IMPORTANT":
+        order_priority = 3  # DELEGATE
+        quadrant = "DELEGATE"
+    else:
+        order_priority = 4  # ELIMINATE
+        quadrant = "ELIMINATE"
+    
+    return urgency, importance, order_priority, quadrant
+
+
+def auto_create_task_from_anomaly(equipment_id: str, vibration: float, temperature: float, 
+                                   health_score: float, status: str) -> Optional[Dict[str, Any]]:
+    """
+    Automatically create maintenance task when AI detects anomaly or future failure
+    """
+    if status not in ["ANOMALY", "WARNING"]:
+        return None
+    
+    # Check if task already exists for this equipment in last 24 hours
+    recent_cutoff = (datetime.utcnow() - timedelta(hours=24)).isoformat() + "Z"
+    existing_tasks = [t for t in _maintenance_tasks_db 
+                     if t["equipmentId"] == equipment_id and t["createdAt"] > recent_cutoff]
+    
+    if existing_tasks:
+        return None  # Don't create duplicate
+    
+    # Generate anomaly ID
+    anomaly_id = f"A-{datetime.utcnow().strftime('%Y-%m-%d-%H%M%S')}-{equipment_id}"
+    
+    # Determine cause and description
+    causes = []
+    if vibration > 85:
+        causes.append(f"High vibration detected ({vibration:.1f})")
+    if temperature > 70:
+        causes.append(f"High temperature detected ({temperature:.1f}°C)")
+    if health_score < 40:
+        causes.append(f"Critical health score ({health_score:.1f}%)")
+    
+    ai_cause = ". ".join(causes) if causes else "Anomaly detected by AI system"
+    
+    # Determine priority and due date
+    if status == "ANOMALY" or health_score < 40:
+        priority = "HIGH"
+        days_until_due = 1  # Urgent - 1 day
+    elif health_score < 60:
+        priority = "MEDIUM"
+        days_until_due = 3  # Soon - 3 days
+    else:
+        priority = "MEDIUM"
+        days_until_due = 7  # Schedule - 1 week
+    
+    due_date = (datetime.utcnow() + timedelta(days=days_until_due)).strftime("%Y-%m-%d")
+    
+    # Classify with Eisenhower Matrix
+    urgency, importance, order_priority, quadrant = classify_eisenhower_matrix(
+        priority, days_until_due, True
+    )
+    
+    # Create task
+    task_count = len(_maintenance_tasks_db) + 1
+    task_id = f"T-{task_count:04d}"
+    
+    new_task = {
+        "id": task_id,
+        "equipmentId": equipment_id,
+        "title": f"Investigate {status.lower()} on {equipment_id}",
+        "description": f"AI system detected {status.lower()} requiring immediate attention. {ai_cause}",
+        "dueDate": due_date,
+        "priority": priority,
+        "status": "NOT_STARTED",
+        "assignedTo": None,
+        "completedBy": None,
+        "completionNotes": None,
+        "completedAt": None,
+        "anomalyId": anomaly_id,
+        "aiDetectedCause": ai_cause,
+        "urgency": urgency,
+        "importance": importance,
+        "orderPriority": order_priority,
+        "eisenhowerQuadrant": quadrant,
+        "createdAt": datetime.utcnow().isoformat() + "Z",
+        "autoCreated": True
+    }
+    
+    _maintenance_tasks_db.append(new_task)
+    return new_task
 
 
 def map_status_code(status_code: str) -> str:
@@ -224,23 +380,597 @@ def calculate_health_score(vibration: float, temperature: float, ai_score: float
 # Equipment & Maintenance APIs
 # -----------------------------
 
+# In-memory storage for equipment (replace with database in production)
+_equipment_db: List[Dict[str, Any]] = [
+    {"id": "MACHINE_002", "name": "Conveyor Belt", "type": "Conveyor", "status": "ONLINE", "location": "Line A", "mqtt_topic": "factory/plc/data"},
+    {"id": "MACHINE_003", "name": "Industrial Motor", "type": "Motor", "status": "ONLINE", "location": "Line B", "mqtt_topic": "factory/plc/data"},
+]
+
 @app.get("/api/equipment")
 def get_equipment() -> list[dict]:
     """Return a list of equipment with basic metadata."""
-    return [
-        {"id": "PRESS_001", "name": "Hydraulic Press", "type": "Press", "status": "ONLINE", "location": "Line A"},
-        {"id": "CONV_014", "name": "Main Conveyor", "type": "Conveyor", "status": "MAINTENANCE", "location": "Dock"},
-        {"id": "MOTOR_207", "name": "Cooling Motor", "type": "Motor", "status": "OFFLINE", "location": "Utility"},
-    ]
+    return _equipment_db
+
+@app.post("/api/equipment")
+def add_equipment(equipment: dict) -> dict:
+    """Register new equipment/PLC connection via ESP32/MQTT"""
+    # Validate required fields
+    required_fields = ["id", "name", "type", "location", "mqtt_topic"]
+    for field in required_fields:
+        if field not in equipment:
+            raise HTTPException(status_code=400, detail=f"Missing required field: {field}")
+    
+    # Check if equipment ID already exists
+    if any(eq["id"] == equipment["id"] for eq in _equipment_db):
+        raise HTTPException(status_code=409, detail=f"Equipment with ID {equipment['id']} already exists")
+    
+    # Add default status if not provided
+    if "status" not in equipment:
+        equipment["status"] = "ONLINE"
+    
+    # Add to database
+    _equipment_db.append(equipment)
+    
+    return {
+        "message": "Equipment registered successfully",
+        "equipment": equipment,
+        "mqtt_info": {
+            "broker": "mqtt://mosquitto:1883",
+            "topic": equipment["mqtt_topic"],
+            "data_format": {
+                "timestamp": "Unix timestamp or ISO 8601",
+                "machine_id": equipment["id"],
+                "equipment_name": equipment["name"],
+                "vibration": "float (sensor reading)",
+                "temperature": "float (°C)",
+                "humidity": "float (% optional)"
+            }
+        }
+    }
+
+@app.delete("/api/equipment/{equipment_id}")
+def delete_equipment(equipment_id: str) -> dict:
+    """Remove equipment from registry"""
+    global _equipment_db
+    initial_count = len(_equipment_db)
+    _equipment_db = [eq for eq in _equipment_db if eq["id"] != equipment_id]
+    
+    if len(_equipment_db) == initial_count:
+        raise HTTPException(status_code=404, detail=f"Equipment {equipment_id} not found")
+    
+    return {"message": f"Equipment {equipment_id} removed successfully"}
+
+# In-memory storage for maintenance tasks (replace with database in production)
+_maintenance_tasks_db: List[Dict[str, Any]] = [
+    {
+        "id": "T-1001",
+        "equipmentId": "PRESS_001",
+        "title": "Lubrication & inspection",
+        "description": "Regular scheduled maintenance for hydraulic press",
+        "dueDate": "2025-12-15",
+        "priority": "MEDIUM",
+        "status": "NOT_STARTED",
+        "assignedTo": None,
+        "completedBy": None,
+        "completionNotes": None,
+        "completedAt": None,
+        "anomalyId": None,
+        "aiDetectedCause": None,
+        "urgency": "NOT_URGENT",
+        "importance": "IMPORTANT",
+        "orderPriority": 2,
+        "eisenhowerQuadrant": "SCHEDULE",
+        "createdAt": "2025-12-01T10:00:00Z",
+        "autoCreated": False
+    },
+    {
+        "id": "T-1002",
+        "equipmentId": "CONV_014",
+        "title": "Belt tension check",
+        "description": "High vibration detected by AI system",
+        "dueDate": "2025-12-12",
+        "priority": "HIGH",
+        "status": "IN_PROGRESS",
+        "assignedTo": "John Smith",
+        "completedBy": None,
+        "completionNotes": None,
+        "completedAt": None,
+        "anomalyId": "A-2025-12-09-001",
+        "aiDetectedCause": "Vibration levels exceeded normal range (85.3). Possible belt misalignment or bearing wear detected.",
+        "urgency": "URGENT",
+        "importance": "IMPORTANT",
+        "orderPriority": 1,
+        "eisenhowerQuadrant": "DO_FIRST",
+        "createdAt": "2025-12-09T08:30:00Z",
+        "autoCreated": True
+    },
+    {
+        "id": "T-1003",
+        "equipmentId": "MOTOR_207",
+        "title": "Bearing replacement",
+        "description": "Scheduled bearing replacement",
+        "dueDate": "2025-12-20",
+        "priority": "LOW",
+        "status": "NOT_STARTED",
+        "assignedTo": None,
+        "completedBy": None,
+        "completionNotes": None,
+        "completedAt": None,
+        "anomalyId": None,
+        "aiDetectedCause": None,
+        "urgency": "NOT_URGENT",
+        "importance": "NOT_IMPORTANT",
+        "orderPriority": 4,
+        "eisenhowerQuadrant": "ELIMINATE",
+        "createdAt": "2025-12-05T14:00:00Z",
+        "autoCreated": False
+    },
+]
 
 @app.get("/api/maintenance/tasks")
-def get_maintenance_tasks() -> list[dict]:
-    """Return upcoming maintenance tasks with priorities and statuses."""
-    return [
-        {"id": "T-1001", "equipmentId": "PRESS_001", "title": "Lubrication & inspection", "dueDate": "2025-12-15", "priority": "MEDIUM", "status": "PLANNED"},
-        {"id": "T-1002", "equipmentId": "CONV_014", "title": "Belt tension check", "dueDate": "2025-12-12", "priority": "HIGH", "status": "IN_PROGRESS"},
-        {"id": "T-1003", "equipmentId": "MOTOR_207", "title": "Bearing replacement", "dueDate": "2025-12-20", "priority": "LOW", "status": "PLANNED"},
+def get_maintenance_tasks(status: Optional[str] = None, sort_by_matrix: bool = True) -> list[dict]:
+    """Return maintenance tasks with optional status filter, sorted by Eisenhower Matrix."""
+    tasks = _maintenance_tasks_db
+    
+    if status:
+        tasks = [task for task in tasks if task["status"] == status]
+    
+    # Sort by Eisenhower Matrix order priority
+    if sort_by_matrix:
+        tasks = sorted(tasks, key=lambda t: (t.get("orderPriority", 999), t.get("dueDate", "9999-12-31")))
+    
+    return tasks
+
+@app.get("/api/maintenance/tasks/{task_id}")
+def get_maintenance_task(task_id: str) -> dict:
+    """Get a specific maintenance task by ID."""
+    task = next((t for t in _maintenance_tasks_db if t["id"] == task_id), None)
+    if not task:
+        raise HTTPException(status_code=404, detail="Task not found")
+    return task
+
+@app.post("/api/maintenance/tasks")
+def create_maintenance_task(task: MaintenanceTaskCreate) -> dict:
+    """Create a new maintenance task from an anomaly or manual entry."""
+    # Generate task ID
+    task_count = len(_maintenance_tasks_db) + 1
+    task_id = f"T-{task_count:04d}"
+    
+    # Calculate days until due
+    try:
+        due_date_obj = datetime.strptime(task.dueDate, "%Y-%m-%d")
+        days_until_due = (due_date_obj - datetime.utcnow()).days
+    except:
+        days_until_due = 7  # Default to 1 week
+    
+    # Classify with Eisenhower Matrix
+    urgency, importance, order_priority, quadrant = classify_eisenhower_matrix(
+        task.priority,
+        days_until_due,
+        task.anomalyId is not None
+    )
+    
+    new_task = {
+        "id": task_id,
+        "equipmentId": task.equipmentId,
+        "title": task.title,
+        "description": task.description,
+        "dueDate": task.dueDate,
+        "priority": task.priority,
+        "status": "NOT_STARTED",
+        "assignedTo": None,
+        "completedBy": None,
+        "completionNotes": None,
+        "completedAt": None,
+        "anomalyId": task.anomalyId,
+        "aiDetectedCause": task.aiDetectedCause,
+        "urgency": urgency,
+        "importance": importance,
+        "orderPriority": order_priority,
+        "eisenhowerQuadrant": quadrant,
+        "createdAt": datetime.utcnow().isoformat() + "Z",
+        "autoCreated": False
+    }
+    
+    _maintenance_tasks_db.append(new_task)
+    return new_task
+
+@app.patch("/api/maintenance/tasks/{task_id}")
+def update_maintenance_task(task_id: str, update: MaintenanceTaskUpdate) -> dict:
+    """Update a maintenance task status, assignee, or completion."""
+    task = next((t for t in _maintenance_tasks_db if t["id"] == task_id), None)
+    if not task:
+        raise HTTPException(status_code=404, detail="Task not found")
+    
+    # Update fields if provided
+    if update.status is not None:
+        task["status"] = update.status
+    if update.assignedTo is not None:
+        task["assignedTo"] = update.assignedTo
+    if update.completedBy is not None:
+        task["completedBy"] = update.completedBy
+    if update.completionNotes is not None:
+        task["completionNotes"] = update.completionNotes
+    if update.completedAt is not None:
+        task["completedAt"] = update.completedAt
+    
+    # Auto-set completion timestamp if status changed to DONE
+    if update.status == "DONE" and not task["completedAt"]:
+        task["completedAt"] = datetime.utcnow().isoformat() + "Z"
+    
+    return task
+
+@app.get("/api/maintenance/report/{task_id}")
+def generate_maintenance_report_pdf(task_id: str):
+    """Generate a detailed maintenance report in PDF format."""
+    task = next((t for t in _maintenance_tasks_db if t["id"] == task_id), None)
+    if not task:
+        raise HTTPException(status_code=404, detail="Task not found")
+    
+    # Generate PDF
+    pdf_buffer = io.BytesIO()
+    pdf_content = generate_pdf_report(task, pdf_buffer)
+    
+    # Return PDF as response
+    pdf_buffer.seek(0)
+    return Response(
+        content=pdf_buffer.getvalue(),
+        media_type="application/pdf",
+        headers={
+            "Content-Disposition": f"attachment; filename=maintenance-report-{task_id}.pdf"
+        }
+    )
+
+def generate_pdf_report(task: dict, buffer: io.BytesIO) -> bytes:
+    """Generate a comprehensive PDF maintenance report."""
+    doc = SimpleDocTemplate(buffer, pagesize=A4,
+                           rightMargin=72, leftMargin=72,
+                           topMargin=72, bottomMargin=18)
+    
+    # Container for PDF elements
+    story = []
+    styles = getSampleStyleSheet()
+    
+    # Custom styles
+    title_style = ParagraphStyle(
+        'CustomTitle',
+        parent=styles['Heading1'],
+        fontSize=24,
+        textColor=colors.HexColor('#1e293b'),
+        spaceAfter=30,
+        alignment=TA_CENTER
+    )
+    
+    heading_style = ParagraphStyle(
+        'CustomHeading',
+        parent=styles['Heading2'],
+        fontSize=16,
+        textColor=colors.HexColor('#0ea5e9'),
+        spaceAfter=12,
+        spaceBefore=12
+    )
+    
+    # Title
+    story.append(Paragraph(f"Maintenance Report", title_style))
+    story.append(Paragraph(f"{task['title']}", styles['Heading2']))
+    story.append(Spacer(1, 0.3*inch))
+    
+    # Task Information Table
+    story.append(Paragraph("Task Information", heading_style))
+    
+    task_data = [
+        ['Task ID:', task['id']],
+        ['Equipment:', task['equipmentId']],
+        ['Status:', task['status'].replace('_', ' ')],
+        ['Priority:', task['priority']],
+        ['Eisenhower Matrix:', task.get('eisenhowerQuadrant', 'N/A').replace('_', ' ')],
+        ['Created:', task['createdAt'][:10]],
+        ['Due Date:', task['dueDate']],
     ]
+    
+    task_table = Table(task_data, colWidths=[2*inch, 4*inch])
+    task_table.setStyle(TableStyle([
+        ('BACKGROUND', (0, 0), (0, -1), colors.HexColor('#e2e8f0')),
+        ('TEXTCOLOR', (0, 0), (-1, -1), colors.black),
+        ('ALIGN', (0, 0), (-1, -1), 'LEFT'),
+        ('FONTNAME', (0, 0), (0, -1), 'Helvetica-Bold'),
+        ('FONTSIZE', (0, 0), (-1, -1), 10),
+        ('BOTTOMPADDING', (0, 0), (-1, -1), 8),
+        ('TOPPADDING', (0, 0), (-1, -1), 8),
+        ('GRID', (0, 0), (-1, -1), 1, colors.grey),
+    ]))
+    
+    story.append(task_table)
+    story.append(Spacer(1, 0.3*inch))
+    
+    # Description
+    story.append(Paragraph("Description", heading_style))
+    story.append(Paragraph(task['description'], styles['BodyText']))
+    story.append(Spacer(1, 0.2*inch))
+    
+    # AI Analysis Section
+    if task.get('anomalyId'):
+        story.append(Paragraph("AI Analysis & Anomaly Detection", heading_style))
+        
+        anomaly_data = [
+            ['Anomaly ID:', task['anomalyId']],
+            ['Auto-Created:', 'Yes' if task.get('autoCreated') else 'No'],
+            ['Detection Time:', task['createdAt'][:16].replace('T', ' ')],
+        ]
+        
+        anomaly_table = Table(anomaly_data, colWidths=[2*inch, 4*inch])
+        anomaly_table.setStyle(TableStyle([
+            ('BACKGROUND', (0, 0), (0, -1), colors.HexColor('#fef3c7')),
+            ('TEXTCOLOR', (0, 0), (-1, -1), colors.black),
+            ('ALIGN', (0, 0), (-1, -1), 'LEFT'),
+            ('FONTNAME', (0, 0), (0, -1), 'Helvetica-Bold'),
+            ('FONTSIZE', (0, 0), (-1, -1), 10),
+            ('BOTTOMPADDING', (0, 0), (-1, -1), 8),
+            ('TOPPADDING', (0, 0), (-1, -1), 8),
+            ('GRID', (0, 0), (-1, -1), 1, colors.grey),
+        ]))
+        
+        story.append(anomaly_table)
+        story.append(Spacer(1, 0.1*inch))
+        
+        if task.get('aiDetectedCause'):
+            story.append(Paragraph("<b>AI Detected Cause:</b>", styles['BodyText']))
+            story.append(Paragraph(task['aiDetectedCause'], styles['BodyText']))
+            story.append(Spacer(1, 0.1*inch))
+            
+            story.append(Paragraph(
+                "The AI system detected abnormal behavior that triggered this maintenance task. "
+                "The anomaly was automatically flagged based on sensor data analysis and predictive models.",
+                styles['BodyText']
+            ))
+    else:
+        story.append(Paragraph("Maintenance Type", heading_style))
+        story.append(Paragraph(
+            "This is a scheduled maintenance task. No anomaly was detected by the AI system.",
+            styles['BodyText']
+        ))
+    
+    story.append(Spacer(1, 0.3*inch))
+    
+    # Eisenhower Matrix Classification
+    story.append(Paragraph("Priority Classification (Eisenhower Matrix)", heading_style))
+    
+    matrix_data = [
+        ['Urgency:', task.get('urgency', 'N/A')],
+        ['Importance:', task.get('importance', 'N/A')],
+        ['Quadrant:', task.get('eisenhowerQuadrant', 'N/A').replace('_', ' ')],
+        ['Order Priority:', str(task.get('orderPriority', 'N/A'))],
+    ]
+    
+    matrix_table = Table(matrix_data, colWidths=[2*inch, 4*inch])
+    matrix_table.setStyle(TableStyle([
+        ('BACKGROUND', (0, 0), (0, -1), colors.HexColor('#dbeafe')),
+        ('TEXTCOLOR', (0, 0), (-1, -1), colors.black),
+        ('ALIGN', (0, 0), (-1, -1), 'LEFT'),
+        ('FONTNAME', (0, 0), (0, -1), 'Helvetica-Bold'),
+        ('FONTSIZE', (0, 0), (-1, -1), 10),
+        ('BOTTOMPADDING', (0, 0), (-1, -1), 8),
+        ('TOPPADDING', (0, 0), (-1, -1), 8),
+        ('GRID', (0, 0), (-1, -1), 1, colors.grey),
+    ]))
+    
+    story.append(matrix_table)
+    story.append(Spacer(1, 0.3*inch))
+    
+    # Assignment & Execution
+    story.append(Paragraph("Assignment & Execution", heading_style))
+    
+    exec_data = [
+        ['Assigned To:', task.get('assignedTo') or 'Not yet assigned'],
+        ['Completed By:', task.get('completedBy') or 'Not completed'],
+        ['Completion Date:', task.get('completedAt', 'N/A')[:10] if task.get('completedAt') else 'N/A'],
+    ]
+    
+    exec_table = Table(exec_data, colWidths=[2*inch, 4*inch])
+    exec_table.setStyle(TableStyle([
+        ('BACKGROUND', (0, 0), (0, -1), colors.HexColor('#e2e8f0')),
+        ('TEXTCOLOR', (0, 0), (-1, -1), colors.black),
+        ('ALIGN', (0, 0), (-1, -1), 'LEFT'),
+        ('FONTNAME', (0, 0), (0, -1), 'Helvetica-Bold'),
+        ('FONTSIZE', (0, 0), (-1, -1), 10),
+        ('BOTTOMPADDING', (0, 0), (-1, -1), 8),
+        ('TOPPADDING', (0, 0), (-1, -1), 8),
+        ('GRID', (0, 0), (-1, -1), 1, colors.grey),
+    ]))
+    
+    story.append(exec_table)
+    story.append(Spacer(1, 0.2*inch))
+    
+    # Completion Notes
+    if task.get('completionNotes'):
+        story.append(Paragraph("Completion Notes", heading_style))
+        story.append(Paragraph(task['completionNotes'], styles['BodyText']))
+        story.append(Spacer(1, 0.2*inch))
+    
+    # Recommendations
+    story.append(Paragraph("Recommendations", heading_style))
+    recommendations = [
+        "Monitor equipment performance after maintenance completion",
+        "Update maintenance schedule based on actual findings and AI predictions",
+        "Document any parts replaced or repairs performed in the system",
+        "Validate AI model predictions against actual findings to improve accuracy",
+        "Review Eisenhower Matrix classification for future similar tasks"
+    ]
+    
+    for rec in recommendations:
+        story.append(Paragraph(f"• {rec}", styles['BodyText']))
+    
+    story.append(Spacer(1, 0.4*inch))
+    
+    # Footer
+    story.append(Paragraph(
+        f"<i>Report generated by IIoT Predictive Maintenance System<br/>"
+        f"Generated at: {datetime.utcnow().strftime('%Y-%m-%d %H:%M:%S')} UTC</i>",
+        styles['Normal']
+    ))
+    
+    # Build PDF
+    doc.build(story)
+    return buffer.getvalue()
+
+def generate_markdown_report(task: dict) -> str:
+    """Generate a Markdown maintenance report."""
+    status_emoji = {
+        "NOT_STARTED": "⏳",
+        "IN_PROGRESS": "🔧",
+        "DONE": "✅"
+    }
+    priority_emoji = {
+        "LOW": "🟢",
+        "MEDIUM": "🟡",
+        "HIGH": "🔴"
+    }
+    
+    report = f"""# Maintenance Report: {task['title']}
+
+## Task Information
+- **Task ID:** {task['id']}
+- **Equipment:** {task['equipmentId']}
+- **Status:** {status_emoji.get(task['status'], '❓')} {task['status'].replace('_', ' ')}
+- **Priority:** {priority_emoji.get(task['priority'], '⚪')} {task['priority']}
+- **Created:** {task['createdAt']}
+- **Due Date:** {task['dueDate']}
+
+## Description
+{task['description']}
+
+## AI Analysis
+"""
+    
+    if task['anomalyId']:
+        report += f"""
+### Anomaly Detection
+- **Anomaly ID:** {task['anomalyId']}
+- **AI Detected Cause:** {task['aiDetectedCause'] or 'No specific cause identified'}
+
+The AI system detected abnormal behavior that triggered this maintenance task. The anomaly was automatically flagged based on sensor data analysis and predictive models.
+"""
+    else:
+        report += "\nThis is a scheduled maintenance task. No anomaly was detected by the AI system.\n"
+    
+    report += f"""
+## Assignment & Execution
+- **Assigned To:** {task['assignedTo'] or 'Not yet assigned'}
+- **Completed By:** {task['completedBy'] or 'Not completed'}
+- **Completion Date:** {task['completedAt'] or 'N/A'}
+
+"""
+    
+    if task['completionNotes']:
+        report += f"""## Completion Notes
+{task['completionNotes']}
+
+"""
+    
+    report += f"""## Recommendations
+- Monitor equipment performance after maintenance
+- Update maintenance schedule based on findings
+- Document any parts replaced or repairs performed
+- Validate AI model predictions against actual findings
+
+---
+*Report generated by IIoT Predictive Maintenance System*  
+*Generated at: {datetime.utcnow().isoformat()}Z*
+"""
+    
+    return report
+
+def generate_latex_report(task: dict) -> str:
+    """Generate a LaTeX maintenance report."""
+    status_symbol = {
+        "NOT_STARTED": r"$\circ$",
+        "IN_PROGRESS": r"$\triangleright$",
+        "DONE": r"$\checkmark$"
+    }
+    
+    report = r"""\documentclass[12pt]{article}
+\usepackage[utf8]{inputenc}
+\usepackage{geometry}
+\usepackage{graphicx}
+\usepackage{hyperref}
+\usepackage{xcolor}
+\geometry{a4paper, margin=1in}
+
+\title{Maintenance Report: """ + task['title'].replace('_', r'\_') + r"""}
+\author{IIoT Predictive Maintenance System}
+\date{""" + datetime.utcnow().strftime("%B %d, %Y") + r"""}
+
+\begin{document}
+
+\maketitle
+
+\section{Task Information}
+\begin{itemize}
+    \item \textbf{Task ID:} """ + task['id'] + r"""
+    \item \textbf{Equipment:} """ + task['equipmentId'].replace('_', r'\_') + r"""
+    \item \textbf{Status:} """ + status_symbol.get(task['status'], r"$\bullet$") + " " + task['status'].replace('_', r'\_') + r"""
+    \item \textbf{Priority:} """ + task['priority'] + r"""
+    \item \textbf{Created:} """ + task['createdAt'] + r"""
+    \item \textbf{Due Date:} """ + task['dueDate'] + r"""
+\end{itemize}
+
+\section{Description}
+""" + task['description'].replace('_', r'\_') + r"""
+
+\section{AI Analysis}
+"""
+    
+    if task['anomalyId']:
+        report += r"""
+\subsection{Anomaly Detection}
+\begin{itemize}
+    \item \textbf{Anomaly ID:} """ + task['anomalyId'] + r"""
+    \item \textbf{AI Detected Cause:} """ + (task['aiDetectedCause'] or 'No specific cause identified').replace('_', r'\_') + r"""
+\end{itemize}
+
+The AI system detected abnormal behavior that triggered this maintenance task. The anomaly was automatically flagged based on sensor data analysis and predictive models.
+"""
+    else:
+        report += r"""
+This is a scheduled maintenance task. No anomaly was detected by the AI system.
+"""
+    
+    report += r"""
+
+\section{Assignment \& Execution}
+\begin{itemize}
+    \item \textbf{Assigned To:} """ + (task['assignedTo'] or 'Not yet assigned').replace('_', r'\_') + r"""
+    \item \textbf{Completed By:} """ + (task['completedBy'] or 'Not completed').replace('_', r'\_') + r"""
+    \item \textbf{Completion Date:} """ + (task['completedAt'] or 'N/A') + r"""
+\end{itemize}
+"""
+    
+    if task['completionNotes']:
+        report += r"""
+\section{Completion Notes}
+""" + task['completionNotes'].replace('_', r'\_') + r"""
+"""
+    
+    report += r"""
+
+\section{Recommendations}
+\begin{itemize}
+    \item Monitor equipment performance after maintenance
+    \item Update maintenance schedule based on findings
+    \item Document any parts replaced or repairs performed
+    \item Validate AI model predictions against actual findings
+\end{itemize}
+
+\vfill
+\hrule
+\vspace{0.2cm}
+\textit{Report generated by IIoT Predictive Maintenance System}\\
+\textit{Generated at: """ + datetime.utcnow().isoformat() + r"""Z}
+
+\end{document}
+"""
+    
+    return report
 
 @app.get("/api/shifts")
 def get_shifts() -> list[dict]:
@@ -308,9 +1038,13 @@ async def root():
 
 
 @app.get("/api/live")
-async def get_live_data():
+async def get_live_data(machine_id: str = "MACHINE_001"):
     """
-    Get the latest sensor reading and AI prediction
+    Get the latest sensor reading and AI prediction for a specific machine
+    
+    Args:
+        machine_id: Equipment identifier (default: MACHINE_001)
+    
     Returns: Current vibration, temperature, AI score, and status
     """
     if not influx_client:
@@ -320,14 +1054,15 @@ async def get_live_data():
         )
     
     try:
-        # Query for the most recent record
+        # Query for the most recent record for specific machine
         query = f'''
             SELECT last("vibration") as vibration,
                    last("temperature") as temperature,
                    last("humidity") as humidity,
                    last("ai_score") as score
             FROM "{MEASUREMENT}"
-            WHERE time > now() - 1h
+            WHERE "machine_id" = '{machine_id}'
+            AND time > now() - 1h
         '''
         
         result = influx_client.query(query)
@@ -336,7 +1071,7 @@ async def get_live_data():
         if not points:
             raise HTTPException(
                 status_code=404,
-                detail="No data available. Ensure the data ingestion pipeline is running."
+                detail=f"No data available for machine {machine_id}. Ensure the data ingestion pipeline is running."
             )
         
         data = points[0]
@@ -345,7 +1080,8 @@ async def get_live_data():
         status_query = f'''
             SELECT last("ai_score") as score
             FROM "{MEASUREMENT}"
-            WHERE time > now() - 1h
+            WHERE "machine_id" = '{machine_id}'
+            AND time > now() - 1h
         '''
         status_result = influx_client.query(status_query)
         
@@ -388,7 +1124,20 @@ async def get_live_data():
         # Calculate health score
         health_data = calculate_health_score(vibration, temperature, score)
         
+        # Auto-create maintenance task if anomaly or warning detected
+        if status in ["ANOMALY", "WARNING"]:
+            auto_task = auto_create_task_from_anomaly(
+                machine_id,
+                vibration,
+                temperature,
+                health_data['score'],
+                status
+            )
+            if auto_task:
+                print(f"✓ Auto-created maintenance task: {auto_task['id']} for {machine_id}")
+        
         return {
+            "machine_id": machine_id,
             "vibration": round(vibration, 2),
             "temperature": round(temperature, 2),
             "humidity": round(humidity, 2),
@@ -405,13 +1154,90 @@ async def get_live_data():
         )
 
 
+@app.get("/api/machines")
+async def get_machines():
+    """
+    Get list of all machines with their latest status
+    
+    Returns: List of machines with current state
+    """
+    if not influx_client:
+        raise HTTPException(
+            status_code=503,
+            detail="InfluxDB connection not available"
+        )
+    
+    try:
+        # Query for all unique machines
+        query = f'''
+            SHOW TAG VALUES FROM "{MEASUREMENT}" WITH KEY = "machine_id"
+        '''
+        
+        result = influx_client.query(query)
+        points = list(result.get_points())
+        
+        if not points:
+            # Return default machines if no data
+            return [
+                {"machine_id": "MACHINE_001", "name": "Hydraulic Press", "status": "UNKNOWN"},
+                {"machine_id": "MACHINE_002", "name": "Conveyor Belt", "status": "UNKNOWN"},
+                {"machine_id": "MACHINE_003", "name": "Industrial Motor", "status": "UNKNOWN"}
+            ]
+        
+        machines = []
+        for point in points:
+            machine_id = point.get('value')
+            if machine_id:
+                # Get latest status for this machine
+                status_query = f'''
+                    SELECT last("ai_score") as score, "equipment_name"
+                    FROM "{MEASUREMENT}"
+                    WHERE "machine_id" = '{machine_id}'
+                    AND time > now() - 5m
+                '''
+                status_result = influx_client.query(status_query)
+                status_points = list(status_result.get_points())
+                
+                if status_points:
+                    score = status_points[0].get('score', 0)
+                    equipment_name = status_points[0].get('equipment_name', machine_id)
+                    
+                    # Determine status
+                    if score < 0.1:
+                        status = "ANOMALY"
+                    elif score < 0.3:
+                        status = "WARNING"
+                    else:
+                        status = "NORMAL"
+                else:
+                    equipment_name = machine_id
+                    status = "UNKNOWN"
+                
+                machines.append({
+                    "machine_id": machine_id,
+                    "name": equipment_name,
+                    "status": status
+                })
+        
+        return machines
+        
+    except Exception as e:
+        # Return default machines on error
+        return [
+            {"machine_id": "MACHINE_001", "name": "Hydraulic Press", "status": "UNKNOWN"},
+            {"machine_id": "MACHINE_002", "name": "Conveyor Belt", "status": "UNKNOWN"},
+            {"machine_id": "MACHINE_003", "name": "Industrial Motor", "status": "UNKNOWN"}
+        ]
+
+
 @app.get("/api/history")
-async def get_history(limit: int = 50):
+async def get_history(limit: int = 50, machine_id: str = None):
     """
     Get historical sensor readings for charting
     
     Args:
         limit: Number of records to return (default: 50, max: 500)
+        machine_id: Optional filter for specific machine
     
     Returns: List of timestamped readings
     """
@@ -425,11 +1251,12 @@ async def get_history(limit: int = 50):
     limit = min(limit, 500)
     
     try:
-        # Query for historical data
+        # Query for historical data with optional machine filter
+        machine_filter = f'AND "machine_id" = \'{machine_id}\'' if machine_id else ''
         query = f'''
-            SELECT "vibration", "temperature", "humidity", "ai_score"
+            SELECT "vibration", "temperature", "humidity", "ai_score", "machine_id"
             FROM "{MEASUREMENT}"
-            WHERE time > now() - 1h
+            WHERE time > now() - 1h {machine_filter}
             ORDER BY time DESC
             LIMIT {limit}
         '''
@@ -466,6 +1293,7 @@ async def get_history(limit: int = 50):
             vibration = _to_float_safe(raw_vibration, 0.0)
             temperature = _to_float_safe(raw_temperature, 0.0)
             humidity = _to_float_safe(raw_humidity, 0.0)
+            machine = point.get('machine_id', 'UNKNOWN')
 
             # Fallback score estimation if missing/zero but signals present
             if (raw_score is None or score == 0.0) and (vibration > 0 or temperature > 0):
@@ -483,6 +1311,7 @@ async def get_history(limit: int = 50):
             
             history.append({
                 "timestamp": point.get('time'),
+                "machine_id": machine,
                 "vibration": round(vibration, 2),
                 "temperature": round(temperature, 2),
                 "humidity": round(humidity, 2),
@@ -597,6 +1426,362 @@ async def get_statistics(equipmentId: Optional[str] = None):
         raise HTTPException(
             status_code=500,
             detail=f"Error querying statistics: {str(e)}"
+        )
+
+
+@app.get("/api/pareto/anomalies")
+async def get_anomaly_pareto(machine_id: Optional[str] = None, days: int = 30):
+    """
+    Get Pareto analysis data for anomaly causes
+    
+    Args:
+        machine_id: Optional filter for specific machine
+        days: Number of days to analyze (default: 30, max: 90)
+    
+    Returns: Pareto data showing anomaly causes ranked by frequency
+    """
+    if not influx_client:
+        raise HTTPException(
+            status_code=503,
+            detail="InfluxDB connection not available"
+        )
+    
+    days = min(days, 90)
+    
+    try:
+        # Query anomalies and warnings from last N days
+        machine_filter = f'AND "machine_id" = \'{machine_id}\'' if machine_id else ''
+        query = f'''
+            SELECT "vibration", "temperature", "ai_score", "machine_id"
+            FROM "{MEASUREMENT}"
+            WHERE time > now() - {days}d {machine_filter}
+        '''
+        
+        result = influx_client.query(query)
+        points = list(result.get_points())
+        
+        # Analyze and categorize anomalies
+        causes = {
+            'High Vibration': 0,
+            'Temperature Spikes': 0,
+            'Combined (Vib + Temp)': 0,
+            'Bearing Wear Pattern': 0,
+            'Low Health Score': 0,
+            'Other': 0
+        }
+        
+        for point in points:
+            vib = point.get('vibration', 0)
+            temp = point.get('temperature', 0)
+            score = point.get('ai_score', 1)
+            
+            # Categorize based on sensor values
+            high_vib = vib > 75
+            high_temp = temp > 70
+            low_score = score < 0.15
+            
+            if high_vib and high_temp:
+                causes['Combined (Vib + Temp)'] += 1
+            elif high_vib:
+                # Check if it's bearing wear pattern (gradual increase)
+                if 75 < vib < 90:
+                    causes['Bearing Wear Pattern'] += 1
+                else:
+                    causes['High Vibration'] += 1
+            elif high_temp:
+                causes['Temperature Spikes'] += 1
+            elif low_score:
+                causes['Low Health Score'] += 1
+            else:
+                causes['Other'] += 1
+        
+        # Calculate percentages and cumulative
+        total = sum(causes.values())
+        if total == 0:
+            # Return default data if no anomalies
+            return [
+                {"factor": "High Vibration", "count": 0, "percentage": 0, "cumulative": 0},
+                {"factor": "Temperature Spikes", "count": 0, "percentage": 0, "cumulative": 0},
+                {"factor": "Combined (Vib + Temp)", "count": 0, "percentage": 0, "cumulative": 0},
+                {"factor": "Bearing Wear Pattern", "count": 0, "percentage": 0, "cumulative": 0},
+                {"factor": "Other", "count": 0, "percentage": 0, "cumulative": 0}
+            ]
+        
+        # Sort by count descending
+        sorted_causes = sorted(causes.items(), key=lambda x: x[1], reverse=True)
+        
+        pareto_data = []
+        cumulative = 0
+        for factor, count in sorted_causes:
+            if count > 0:  # Only include non-zero causes
+                percentage = round((count / total) * 100, 1)
+                cumulative += percentage
+                pareto_data.append({
+                    "factor": factor,
+                    "count": count,
+                    "percentage": percentage,
+                    "cumulative": round(cumulative, 1)
+                })
+        
+        return pareto_data
+        
+    except Exception as e:
+        raise HTTPException(
+            status_code=500,
+            detail=f"Error generating Pareto data: {str(e)}"
+        )
+
+
+@app.get("/api/pareto/maintenance")
+async def get_maintenance_pareto(days: int = 90):
+    """
+    Get Pareto analysis for maintenance tasks
+    
+    Args:
+        days: Number of days to analyze (default: 90)
+    
+    Returns: Pareto data showing most common maintenance types
+    """
+    try:
+        # Analyze maintenance tasks from database
+        task_types = {
+            'Vibration Issues': 0,
+            'Temperature Problems': 0,
+            'Bearing Replacement': 0,
+            'Lubrication': 0,
+            'Belt Adjustment': 0,
+            'Preventive Maintenance': 0,
+            'Other': 0
+        }
+        
+        # Categorize existing tasks
+        for task in _maintenance_tasks_db.values():
+            title = task['title'].lower()
+            desc = task['description'].lower()
+            
+            if 'vibration' in title or 'vibration' in desc:
+                task_types['Vibration Issues'] += 1
+            elif 'temperature' in title or 'temperature' in desc or 'heat' in desc:
+                task_types['Temperature Problems'] += 1
+            elif 'bearing' in title or 'bearing' in desc:
+                task_types['Bearing Replacement'] += 1
+            elif 'lubrication' in title or 'lubrication' in desc or 'oil' in desc:
+                task_types['Lubrication'] += 1
+            elif 'belt' in title or 'belt' in desc:
+                task_types['Belt Adjustment'] += 1
+            elif 'schedule' in title or 'preventive' in desc:
+                task_types['Preventive Maintenance'] += 1
+            else:
+                task_types['Other'] += 1
+        
+        total = sum(task_types.values())
+        if total == 0:
+            total = 1  # Avoid division by zero
+        
+        # Sort and calculate percentages
+        sorted_types = sorted(task_types.items(), key=lambda x: x[1], reverse=True)
+        
+        pareto_data = []
+        cumulative = 0
+        for task_type, count in sorted_types:
+            if count > 0:
+                percentage = round((count / total) * 100, 1)
+                cumulative += percentage
+                pareto_data.append({
+                    "factor": task_type,
+                    "count": count,
+                    "percentage": percentage,
+                    "cumulative": round(cumulative, 1),
+                    "cost_estimate": count * 500  # Estimated cost per task
+                })
+        
+        return pareto_data
+        
+    except Exception as e:
+        raise HTTPException(
+            status_code=500,
+            detail=f"Error generating maintenance Pareto: {str(e)}"
+        )
+
+
+@app.get("/api/rul")
+async def get_remaining_useful_life(machine_id: Optional[str] = None):
+    """
+    Calculate Remaining Useful Life (RUL) for machines using ML-based degradation analysis.
+    
+    RUL Calculation Method:
+    1. Analyze historical health score degradation rate
+    2. Calculate exponential decay based on current trajectory
+    3. Factor in vibration and temperature trends
+    4. Estimate days until critical threshold (20% health)
+    
+    Returns:
+    - rul_days: Estimated days until maintenance required
+    - confidence: Prediction confidence (0-100%)
+    - degradation_rate: Daily health score decline
+    - critical_factors: Key contributors to degradation
+    - recommendation: Maintenance action suggestion
+    """
+    if not influx_client:
+        raise HTTPException(status_code=503, detail="InfluxDB not connected")
+    
+    try:
+        # Get list of machines to analyze
+        machines_to_analyze = []
+        if machine_id:
+            machines_to_analyze = [machine_id]
+        else:
+            # Get all unique machines
+            query = f'SHOW TAG VALUES FROM "{MEASUREMENT}" WITH KEY = "machine_id"'
+            result = influx_client.query(query)
+            machines_to_analyze = [point['value'] for point in result.get_points()]
+            if not machines_to_analyze:
+                machines_to_analyze = ['MACHINE_001', 'MACHINE_002', 'MACHINE_003']
+        
+        rul_predictions = []
+        
+        for mid in machines_to_analyze:
+            # Query last 7 days of data for trend analysis
+            query = f'''
+                SELECT mean("vibration") as vibration,
+                       mean("temperature") as temperature,
+                       mean("humidity") as humidity,
+                       mean("health_score") as health_score
+                FROM "{MEASUREMENT}"
+                WHERE "machine_id" = '{mid}'
+                  AND time > now() - 7d
+                GROUP BY time(6h)
+                ORDER BY time DESC
+            '''
+            
+            result = influx_client.query(query)
+            points = list(result.get_points())
+            
+            if len(points) < 4:  # Need at least 24 hours of data
+                # Insufficient data - use default estimates
+                rul_predictions.append({
+                    "machine_id": mid,
+                    "rul_days": 30,
+                    "confidence": 30,
+                    "health_score": 85,
+                    "degradation_rate": 0.5,
+                    "critical_factors": ["Insufficient historical data"],
+                    "recommendation": "Continue monitoring - collecting baseline data",
+                    "status": "MONITORING",
+                    "urgency": "LOW"
+                })
+                continue
+            
+            # Extract time series data
+            health_scores = [p.get('health_score', 80) for p in reversed(points) if p.get('health_score') is not None]
+            vibrations = [p.get('vibration', 50) for p in reversed(points) if p.get('vibration') is not None]
+            temperatures = [p.get('temperature', 50) for p in reversed(points) if p.get('temperature') is not None]
+            
+            if not health_scores:
+                health_scores = [80]
+            
+            current_health = health_scores[-1] if health_scores else 80
+            
+            # Calculate degradation rate using linear regression
+            if len(health_scores) >= 4:
+                x = np.arange(len(health_scores)).reshape(-1, 1)
+                y = np.array(health_scores)
+                
+                # Simple linear regression for trend
+                x_mean = x.mean()
+                y_mean = y.mean()
+                slope = np.sum((x.flatten() - x_mean) * (y - y_mean)) / np.sum((x.flatten() - x_mean) ** 2)
+                
+                # Convert slope to daily degradation rate (6h intervals to daily)
+                degradation_rate = abs(slope * 4)  # 4 intervals per day
+            else:
+                degradation_rate = 0.5  # Default moderate degradation
+            
+            # Calculate RUL based on degradation rate
+            critical_threshold = 20  # Health score below 20% requires immediate maintenance
+            
+            if degradation_rate > 0.1:
+                rul_days = max(1, int((current_health - critical_threshold) / degradation_rate))
+            else:
+                rul_days = 90  # Stable system - predict 90 days
+            
+            # Analyze critical factors
+            critical_factors = []
+            avg_vibration = np.mean(vibrations[-8:]) if len(vibrations) >= 8 else np.mean(vibrations)
+            avg_temperature = np.mean(temperatures[-8:]) if len(temperatures) >= 8 else np.mean(temperatures)
+            
+            if avg_vibration > 75:
+                critical_factors.append(f"High vibration ({avg_vibration:.1f})")
+            if avg_temperature > 70:
+                critical_factors.append(f"Elevated temperature ({avg_temperature:.1f}°C)")
+            if degradation_rate > 1.5:
+                critical_factors.append(f"Rapid health decline ({degradation_rate:.2f}%/day)")
+            
+            # Check for accelerating degradation
+            if len(health_scores) >= 8:
+                recent_rate = abs((health_scores[-1] - health_scores[-4]) / 4)
+                earlier_rate = abs((health_scores[-5] - health_scores[-8]) / 4)
+                if recent_rate > earlier_rate * 1.5:
+                    critical_factors.append("Accelerating degradation detected")
+            
+            if not critical_factors:
+                critical_factors = ["Normal operating conditions"]
+            
+            # Calculate confidence based on data quality and consistency
+            data_points = len(points)
+            confidence = min(95, 30 + (data_points * 2))  # More data = higher confidence
+            
+            # Reduce confidence for erratic health scores
+            if len(health_scores) >= 4:
+                health_variance = np.std(health_scores)
+                if health_variance > 15:
+                    confidence -= 20
+            
+            confidence = max(30, confidence)
+            
+            # Determine status and recommendation
+            if rul_days <= 3:
+                status = "CRITICAL"
+                urgency = "IMMEDIATE"
+                recommendation = "Schedule emergency maintenance within 24 hours"
+            elif rul_days <= 7:
+                status = "WARNING"
+                urgency = "HIGH"
+                recommendation = "Schedule maintenance within this week"
+            elif rul_days <= 14:
+                status = "ATTENTION"
+                urgency = "MEDIUM"
+                recommendation = "Plan maintenance within 2 weeks"
+            elif rul_days <= 30:
+                status = "NORMAL"
+                urgency = "LOW"
+                recommendation = "Schedule routine maintenance next month"
+            else:
+                status = "HEALTHY"
+                urgency = "LOW"
+                recommendation = "Continue normal operations and monitoring"
+            
+            rul_predictions.append({
+                "machine_id": mid,
+                "rul_days": rul_days,
+                "confidence": round(confidence, 1),
+                "health_score": round(current_health, 1),
+                "degradation_rate": round(degradation_rate, 2),
+                "critical_factors": critical_factors,
+                "recommendation": recommendation,
+                "status": status,
+                "urgency": urgency,
+                "predicted_failure_date": (datetime.now() + timedelta(days=rul_days)).strftime("%Y-%m-%d"),
+                "avg_vibration": round(avg_vibration, 1),
+                "avg_temperature": round(avg_temperature, 1)
+            })
+        
+        return rul_predictions
+        
+    except Exception as e:
+        raise HTTPException(
+            status_code=500,
+            detail=f"Error calculating RUL: {str(e)}"
         )
 
 

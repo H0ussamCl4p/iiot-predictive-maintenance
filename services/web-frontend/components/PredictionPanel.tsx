@@ -43,18 +43,30 @@ export default function PredictionPanel({ equipmentId }: { equipmentId?: string 
   useEffect(() => {
     const fetchPrediction = async () => {
       try {
-        // Use sample data for prediction
+        // First fetch live data for the machine
+        const machineId = equipmentId || 'MACHINE_002'
+        const liveResponse = await fetch(`http://localhost:8000/api/live?machine_id=${machineId}`)
+        
+        if (!liveResponse.ok) {
+          setError('Failed to fetch live data')
+          setLoading(false)
+          return
+        }
+        
+        const liveData = await liveResponse.json()
+        
+        // Use live data for prediction with reasonable Age and Quantity estimates
         const response = await fetch('http://localhost:8000/predict', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
             data: {
-              Humidity: 65,
-              Temperature: 45,
-              Age: 12,
-              Quantity: 42000
+              Humidity: liveData.humidity || 50,
+              Temperature: liveData.temperature || 45,
+              Age: 12,  // Default age in months
+              Quantity: 40000  // Default production quantity
             },
-            equipmentId: equipmentId
+            equipmentId: machineId
           })
         })
 
