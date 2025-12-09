@@ -4,6 +4,7 @@ import useSWR from "swr"
 import { Card, CardHeader, CardTitle, CardDescription, CardContent } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
 import { Activity, BrainCircuit, Zap } from "lucide-react"
+import { apiUrl } from '@/lib/api-config'
 
 type ModelsStatus = {
   anomaly_detection_model: {
@@ -23,7 +24,7 @@ type ModelsStatus = {
 const fetcher = (url: string) => fetch(url).then(r => r.json())
 
 export default function ModelStatusCard() {
-  const { data, error } = useSWR<ModelsStatus>("http://localhost:8000/models/status", fetcher, { refreshInterval: 15000 })
+  const { data, error } = useSWR<ModelsStatus>(apiUrl('/models/status'), fetcher, { refreshInterval: 15000 })
 
   return (
     <Card>

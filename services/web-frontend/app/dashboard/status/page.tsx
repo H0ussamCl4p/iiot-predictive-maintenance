@@ -5,6 +5,7 @@ import ModelStatusCard from '@/components/ModelStatusCard'
 import { Card, CardHeader, CardTitle, CardContent, CardDescription } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
 import type { LiveData } from '@/types'
+import { apiUrl } from '@/lib/api-config'
 
 const fetcher = (url: string) => fetch(url).then(res => res.json())
 
@@ -25,9 +26,9 @@ function StatusBadge({ status }: { status: string }) {
 }
 
 export default function StatusPage() {
-  const { data: machines } = useSWR<Machine[]>('http://localhost:8000/api/machines', fetcher, { refreshInterval: 3000 })
-  const { data: liveData2 } = useSWR<LiveData>('http://localhost:8000/api/live?machine_id=MACHINE_002', fetcher, { refreshInterval: 3000 })
-  const { data: liveData3 } = useSWR<LiveData>('http://localhost:8000/api/live?machine_id=MACHINE_003', fetcher, { refreshInterval: 3000 })
+  const { data: machines } = useSWR<Machine[]>(apiUrl('/api/machines'), fetcher, { refreshInterval: 3000 })
+  const { data: liveData2 } = useSWR<LiveData>(apiUrl('/api/live?machine_id=MACHINE_002'), fetcher, { refreshInterval: 3000 })
+  const { data: liveData3 } = useSWR<LiveData>(apiUrl('/api/live?machine_id=MACHINE_003'), fetcher, { refreshInterval: 3000 })
 
   const allMachines = [
     { id: 'MACHINE_002', name: 'Conveyor Belt', data: liveData2 },

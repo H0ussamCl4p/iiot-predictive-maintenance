@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { Activity, Lock, Shield, ArrowRight } from "lucide-react";
 import { motion } from "framer-motion";
 import Link from "next/link";
+import { authUrl } from "@/lib/api-config";
 
 export default function LoginPage() {
   const router = useRouter();
@@ -26,8 +27,7 @@ export default function LoginPage() {
     setError("");
 
     try {
-      const authUrl = process.env.NEXT_PUBLIC_AUTH_URL || "http://localhost:8001";
-      const res = await fetch(`${authUrl}/auth/login`, {
+      const res = await fetch(authUrl('/auth/login'), {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
