@@ -4,6 +4,7 @@ import useSWR from 'swr'
 import { Card, CardHeader, CardTitle, CardDescription, CardContent } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
 import AddEquipmentDialog from '@/components/AddEquipmentDialog'
+import { apiUrl } from '@/lib/api-config'
 
 type Equipment = {
   id: string
@@ -31,7 +32,7 @@ function StatusBadge({ status }: { status: Equipment['status'] }) {
 export default function EquipmentPage() {
   const fetcher = (url: string) => fetch(url).then(res => res.json())
   const { data, error } = useSWR<Equipment[]>(
-    'http://localhost:8000/api/equipment',
+    apiUrl('/api/equipment'),
     fetcher,
     { refreshInterval: 15000 }
   )

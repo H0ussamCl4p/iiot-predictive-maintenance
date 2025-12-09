@@ -5,8 +5,8 @@ import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { FileText, Download, Calendar } from 'lucide-react'
 import useSWR from 'swr'
+import { apiUrl } from '@/lib/api-config'
 
-const API_BASE = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000'
 const fetcher = (url: string) => fetch(url).then((r) => r.json())
 
 type Report = {
@@ -28,22 +28,22 @@ function StatusBadge({ status }: { status: Report['status'] }) {
 }
 
 export default function ReportsPage() {
-  const { data: reports = [], isLoading: reportsLoading } = useSWR<Report[]>(`${API_BASE}/api/reports`, fetcher, {
-    refreshInterval: 15000,
+  const { data: reports = [], isLoading: reportsLoading } = useSWR<Report[]>(apiUrl('/api/reports'), fetcher, {
+    refreshInterval: 30000,
   })
-  const { data: compliance } = useSWR<any>(`${API_BASE}/api/compliance`, fetcher, {
+  const { data: compliance } = useSWR<any>(apiUrl('/api/compliance'), fetcher, {
     refreshInterval: 30000,
   })
 
   return (
     <div className="grid grid-cols-1 gap-4">
       <Card>
-        <CardHeader className="flex flex-row items-center justify-between">
+        <CardHeader className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
           <div>
             <CardTitle>Reports & Analytics</CardTitle>
             <CardDescription>Download compliance and production reports</CardDescription>
           </div>
-          <Button className="bg-emerald-500 hover:bg-emerald-600">
+          <Button className="w-full sm:w-auto bg-emerald-500 hover:bg-emerald-600">
             Generate Report
           </Button>
         </CardHeader>

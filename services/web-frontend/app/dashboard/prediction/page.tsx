@@ -5,20 +5,21 @@ import useSWR from 'swr'
 import PredictionPanel from '@/components/PredictionPanel'
 import RULPrediction from '@/components/RULPrediction'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
+import { apiUrl } from '@/lib/api-config'
 
 const fetcher = (url: string) => fetch(url).then(res => res.json())
 
 export default function PredictionPage() {
   const [machineId, setMachineId] = useState<string>('MACHINE_002')
-  const { data: machines } = useSWR<any[]>('http://localhost:8000/api/machines', fetcher, { refreshInterval: 10000 })
+  const { data: machines } = useSWR<any[]>(apiUrl('/api/machines'), fetcher, { refreshInterval: 10000 })
   
   return (
     <div className="space-y-6">
       {/* Machine Selector */}
-      <div className="flex items-center gap-3">
-        <label className="text-slate-400 text-sm">Machine:</label>
+      <div className="flex flex-col sm:flex-row items-start sm:items-center gap-3">
+        <label className="text-slate-400 text-sm whitespace-nowrap">Machine:</label>
         <Select value={machineId} onValueChange={setMachineId}>
-          <SelectTrigger className="w-[280px] bg-slate-900/60 border-slate-800 text-white">
+          <SelectTrigger className="w-full sm:w-[280px] bg-slate-900/60 border-slate-800 text-white">
             <SelectValue placeholder="Select Machine" />
           </SelectTrigger>
           <SelectContent className="bg-slate-900 border-slate-800">

@@ -4,8 +4,8 @@ import { Card, CardHeader, CardTitle, CardDescription, CardContent } from '@/com
 import { Badge } from '@/components/ui/badge'
 import { Clock, CheckCircle, XCircle, AlertTriangle } from 'lucide-react'
 import useSWR from 'swr'
+import { apiUrl } from '@/lib/api-config'
 
-const API_BASE = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000'
 const fetcher = (url: string) => fetch(url).then((r) => r.json())
 
 type Shift = {
@@ -27,10 +27,10 @@ function StatusIcon({ status }: { status: Shift['status'] }) {
 }
 
 export default function ShiftManagementPage() {
-  const { data: shifts = [], isLoading } = useSWR<Shift[]>(`${API_BASE}/api/shifts`, fetcher, {
+  const { data: shifts = [], isLoading } = useSWR<Shift[]>(apiUrl('/api/shifts'), fetcher, {
     refreshInterval: 10000,
   })
-  const { data: oeeData } = useSWR<any>(`${API_BASE}/api/production/oee`, fetcher, {
+  const { data: oeeData } = useSWR<any>(apiUrl('/api/production/oee'), fetcher, {
     refreshInterval: 10000,
   })
 
@@ -53,7 +53,7 @@ export default function ShiftManagementPage() {
           ) : (
             <div className="space-y-3">
               {shifts.map(shift => (
-                <div key={shift.id} className="flex items-center justify-between p-4 bg-slate-900/50 border border-slate-800 rounded-lg">
+                <div key={shift.id} className="flex flex-col sm:flex-row sm:items-center justify-between p-4 bg-slate-900/50 border border-slate-800 rounded-lg gap-4">
                   <div className="flex items-center gap-4">
                     <StatusIcon status={shift.status} />
                     <div>
@@ -61,8 +61,8 @@ export default function ShiftManagementPage() {
                       <p className="text-slate-400 text-sm">{shift.startTime} - {shift.endTime}</p>
                     </div>
                   </div>
-                  <div className="flex items-center gap-4">
-                    <div className="text-right">
+                  <div className="flex items-center justify-between sm:justify-end gap-4 w-full sm:w-auto">
+                    <div className="text-left sm:text-right">
                       <p className="text-slate-400 text-xs">Operator</p>
                       <p className="text-white text-sm">{shift.operator}</p>
                     </div>

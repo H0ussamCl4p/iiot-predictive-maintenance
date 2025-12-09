@@ -14,6 +14,7 @@ import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, D
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Textarea } from '@/components/ui/textarea'
+import { apiUrl } from '@/lib/api-config'
 
 const fetcher = (url: string) => fetch(url).then(res => res.json())
 
@@ -26,19 +27,19 @@ export default function AnomalyPage() {
   const [taskPriority, setTaskPriority] = useState<'LOW' | 'MEDIUM' | 'HIGH'>('MEDIUM')
   const [isCreating, setIsCreating] = useState(false)
   
-  const { data: machines } = useSWR<any[]>('http://localhost:8000/api/machines', fetcher, { refreshInterval: 10000 })
+  const { data: machines } = useSWR<any[]>(apiUrl('/api/machines'), fetcher, { refreshInterval: 10000 })
   const { data: liveData } = useSWR<LiveData>(
-    `http://localhost:8000/api/live?machine_id=${machineId}`,
+    apiUrl(`/api/live?machine_id=${machineId}`),
     fetcher,
     { refreshInterval: 1000 }
   )
   const { data: historyData } = useSWR<HistoricalData[]>(
-    `http://localhost:8000/api/history?limit=50&machine_id=${machineId}`,
+    apiUrl(`/api/history?limit=50&machine_id=${machineId}`),
     fetcher,
     { refreshInterval: 5000 }
   )
   const { data: alertsData } = useSWR<Alert[]>(
-    'http://localhost:8000/api/alerts?limit=50',
+    apiUrl('/api/alerts?limit=50'),
     fetcher,
     { refreshInterval: 15000 }
   )
@@ -67,7 +68,7 @@ export default function AnomalyPage() {
         `Vibration: ${liveData.vibration}, Temperature: ${liveData.temperature}, Health Score: ${liveData.health?.score}. Status: ${liveData.status}` :
         'Anomaly detected by AI system'
       
-      const response = await fetch('http://localhost:8000/api/maintenance/tasks', {
+      const response = await fetch(apiUrl('/api/maintenance/tasks'), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -82,7 +83,7 @@ export default function AnomalyPage() {
       })
       
       if (response.ok) {
-        await mutate('http://localhost:8000/api/maintenance/tasks')
+        await mutate(apiUrl('/api/maintenance/tasks'))
         setIsCreateTaskOpen(false)
         // Reset form
         setTaskTitle('')
@@ -102,11 +103,11 @@ export default function AnomalyPage() {
   return (
     <div className="space-y-6">
       {/* Machine Selector & Action Button */}
-      <div className="flex items-center justify-between gap-3">
-        <div className="flex items-center gap-3">
-          <label className="text-slate-400 text-sm">Machine:</label>
+      <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
+        <div className="flex flex-col sm:flex-row items-start sm:items-center gap-3 w-full sm:w-auto">
+          <label className="text-slate-400 text-sm whitespace-nowrap">Machine:</label>
           <Select value={machineId} onValueChange={setMachineId}>
-            <SelectTrigger className="w-[280px] bg-slate-900/60 border-slate-800 text-white">
+            <SelectTrigger className="w-full sm:w-[280px] bg-slate-900/60 border-slate-800 text-white">
               <SelectValue placeholder="Select Machine" />
             </SelectTrigger>
             <SelectContent className="bg-slate-900 border-slate-800">
@@ -125,7 +126,7 @@ export default function AnomalyPage() {
         {isAnomalyDetected && (
           <Button
             onClick={handleTakeAction}
-            className="bg-orange-600 hover:bg-orange-700 text-white flex items-center gap-2"
+            className="w-full sm:w-auto bg-orange-600 hover:bg-orange-700 text-white flex items-center justify-center gap-2"
           >
             <Wrench className="w-4 h-4" />
             Take Action
@@ -185,12 +186,12 @@ export default function AnomalyPage() {
         </div>
 
         <Card className="lg:col-span-2">
-          <CardHeader className="flex items-center justify-between">
+          <CardHeader className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
             <div>
-              <CardTitle>AI Health Score Trend</CardTitle>
+              <CardTitle className="text-base sm:text-lg">AI Health Score Trend</CardTitle>
               <CardDescription>Last 50 readings</CardDescription>
             </div>
-            <div className="flex items-center space-x-2 px-3 py-1 bg-emerald-500/10 border border-emerald-500/30 rounded-full w-fit">
+            <div className="flex items-center space-x-2 px-3 py-1 bg-emerald-500/10 border border-emerald-500/30 rounded-full w-fit shrink-0">
               <div className="w-2 h-2 bg-emerald-500 rounded-full animate-pulse"></div>
               <span className="text-xs text-emerald-500 font-medium">LIVE</span>
             </div>

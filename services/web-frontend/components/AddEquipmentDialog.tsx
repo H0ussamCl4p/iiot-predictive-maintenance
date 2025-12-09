@@ -9,6 +9,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Textarea } from '@/components/ui/textarea'
 import { Plus, Wifi, Database } from 'lucide-react'
 import { mutate } from 'swr'
+import { apiUrl } from '@/lib/api-config'
 
 interface AddEquipmentDialogProps {
   onSuccess?: () => void
@@ -31,7 +32,7 @@ export default function AddEquipmentDialog({ onSuccess }: AddEquipmentDialogProp
     setLoading(true)
 
     try {
-      const response = await fetch('http://localhost:8000/api/equipment', {
+      const response = await fetch(apiUrl('/api/equipment'), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(formData)
@@ -56,7 +57,7 @@ export default function AddEquipmentDialog({ onSuccess }: AddEquipmentDialogProp
       )
 
       // Refresh equipment list
-      mutate('http://localhost:8000/api/equipment')
+      mutate(apiUrl('/api/equipment'))
       
       // Reset form and close dialog
       setFormData({

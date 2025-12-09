@@ -7,6 +7,7 @@ import TelemetryCharts from '@/components/TelemetryCharts'
 import TelemetryTable from '@/components/TelemetryTable'
 import PredictionPanel from '@/components/PredictionPanel'
 import HealthScoreCard from '@/components/HealthScoreCard'
+import { apiUrl } from '@/lib/api-config'
 
 const fetcher = (url: string) => fetch(url).then(res => res.json())
 
@@ -15,12 +16,12 @@ export default function EquipmentDetailPage() {
   const equipmentId = params?.id as string
 
   const { data: historyData } = useSWR(
-    `http://localhost:8000/api/history?limit=50&equipmentId=${encodeURIComponent(equipmentId)}`,
+    apiUrl(`/api/history?limit=50&equipmentId=${encodeURIComponent(equipmentId)}`),
     fetcher,
     { refreshInterval: 10000 }
   )
   const { data: liveData } = useSWR(
-    `http://localhost:8000/api/live?equipmentId=${encodeURIComponent(equipmentId)}`,
+    apiUrl(`/api/live?equipmentId=${encodeURIComponent(equipmentId)}`),
     fetcher,
     { refreshInterval: 1000 }
   )

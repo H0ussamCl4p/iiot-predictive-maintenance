@@ -6,6 +6,7 @@ import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { Calendar, Plus, AlertTriangle, Clock, Wrench } from 'lucide-react'
 import { mutate } from 'swr'
+import { apiUrl } from '@/lib/api-config'
 
 interface MaintenanceForecastProps {
   machineId: string
@@ -50,7 +51,7 @@ export default function MaintenanceForecast({
       const dueDate = new Date()
       dueDate.setDate(dueDate.getDate() + Math.max(1, daysUntilMaintenance - 1))
       
-      const response = await fetch('http://localhost:8000/api/maintenance/tasks', {
+      const response = await fetch(apiUrl('/api/maintenance/tasks'), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -65,7 +66,7 @@ export default function MaintenanceForecast({
       })
       
       if (response.ok) {
-        await mutate('http://localhost:8000/api/maintenance/tasks')
+        await mutate(apiUrl('/api/maintenance/tasks'))
         alert(`✓ Maintenance task added to calendar for ${dueDate.toLocaleDateString()}`)
       } else {
         alert('Failed to add maintenance task')

@@ -16,6 +16,7 @@ import 'react-big-calendar/lib/css/react-big-calendar.css'
 import { FileText, Download, User, Calendar as CalendarIcon } from 'lucide-react'
 import ParetoChart from '@/components/ParetoChart'
 import Link from 'next/link'
+import { apiUrl } from '@/lib/api-config'
 
 const locales = {
   'en-US': enUS,
@@ -133,7 +134,7 @@ export default function MaintenancePage() {
   
   const fetcher = (url: string) => fetch(url).then(res => res.json())
   const { data, error } = useSWR<Task[]>(
-    'http://localhost:8000/api/maintenance/tasks',
+    apiUrl('/api/maintenance/tasks'),
     fetcher,
     { refreshInterval: 30000 }
   )
@@ -151,7 +152,7 @@ export default function MaintenancePage() {
     
     setIsUpdating(true)
     try {
-      const response = await fetch(`http://localhost:8000/api/maintenance/tasks/${selectedTask.id}`, {
+      const response = await fetch(apiUrl(`/api/maintenance/tasks/${selectedTask.id}`), {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -163,7 +164,7 @@ export default function MaintenancePage() {
       })
       
       if (response.ok) {
-        await mutate('http://localhost:8000/api/maintenance/tasks')
+        await mutate(apiUrl('/api/maintenance/tasks'))
         setIsDetailsOpen(false)
       }
     } catch (error) {
@@ -177,7 +178,7 @@ export default function MaintenancePage() {
     if (!selectedTask) return
     
     try {
-      const response = await fetch(`http://localhost:8000/api/maintenance/report/${selectedTask.id}`)
+      const response = await fetch(apiUrl(`/api/maintenance/report/${selectedTask.id}`))
       
       if (response.ok) {
         // Download the PDF
@@ -240,15 +241,29 @@ export default function MaintenancePage() {
         </CardHeader>
         <CardContent>
           <Tabs defaultValue="calendar" className="w-full">
-            <TabsList className="grid w-full grid-cols-4 mb-4">
-              <TabsTrigger value="calendar">Calendar View</TabsTrigger>
-              <TabsTrigger value="list">List View</TabsTrigger>
-              <TabsTrigger value="matrix">Eisenhower Matrix</TabsTrigger>
-              <TabsTrigger value="analytics">Analytics</TabsTrigger>
-            </TabsList>
+            <div className="overflow-x-auto pb-2 mb-4">
+              <TabsList className="inline-flex w-auto min-w-full sm:grid sm:w-full sm:grid-cols-4 gap-1">
+                <TabsTrigger value="calendar" className="whitespace-nowrap px-3 sm:px-4">Calendar</TabsTrigger>
+                <TabsTrigger value="list" className="whitespace-nowrap px-3 sm:px-4">List</TabsTrigger>
+                <TabsTrigger value="matrix" className="whitespace-nowrap px-3 sm:px-4">Matrix</TabsTrigger>
+                <TabsTrigger value="analytics" className="whitespace-nowrap px-3 sm:px-4">Analytics</TabsTrigger>
+              </TabsList>
+            </div>
             
             <TabsContent value="calendar">
-              <div className="h-[600px] bg-slate-950 rounded-lg p-4 border border-slate-800">
+              <div className="h-[600px] sm:h-[700px] bg-slate-950 rounded-lg p-2 sm:p-4 border border-slate-800 overflow-x-auto">
+                <div className="min-w-[600px] h-full">
+                  <Calendar
+                    localizer={localizer}
+                    events={events}
+                    startAccessor="start"
+                    endAccessor="end"
+                    style={{ height: '100%' }}
+                    onSelectEvent={(event) => handleViewTask((event as CalendarEvent).task)}
+                    eventPropGetter={eventStyleGetter}
+                    views={['month', 'week', 'day']}
+                  />
+                </div>
                 <style jsx global>{`
                   .rbc-calendar {
                     color: #e2e8f0;
@@ -316,6 +331,28 @@ export default function MaintenancePage() {
                     font-weight: 600;
                     font-size: 1.125rem;
                   }
+                  @media (max-width: 640px) {
+                    .rbc-toolbar {
+                      flex-direction: column;
+                      gap: 0.5rem;
+                      align-items: stretch;
+                    }
+                    .rbc-toolbar-label {
+                      margin: 0.5rem 0;
+                      text-align: center;
+                      order: -1;
+                    }
+                    .rbc-btn-group {
+                      display: flex;
+                      justify-content: center;
+                      flex-wrap: wrap;
+                      gap: 0.25rem;
+                    }
+                    .rbc-btn-group button {
+                      padding: 8px 12px;
+                      font-size: 0.75rem;
+                    }
+                  }
                 `}</style>
                 <Calendar
                   localizer={localizer}
@@ -332,35 +369,36 @@ export default function MaintenancePage() {
             </TabsContent>
             
             <TabsContent value="list">
-              <div className="overflow-x-auto">
-                <table className="w-full text-sm">
-                  <thead className="bg-slate-900/60">
-                    <tr className="text-slate-400">
-                      <th className="text-left px-3 py-2">Task</th>
-                      <th className="text-left px-3 py-2">Equipment</th>
-                      <th className="text-left px-3 py-2">Due</th>
-                      <th className="text-left px-3 py-2">Priority</th>
-                      <th className="text-left px-3 py-2">Status</th>
-                      <th className="text-left px-3 py-2">Assigned</th>
-                      <th className="text-left px-3 py-2">Actions</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {tasks.map(t => (
-                      <tr key={t.id} className="border-t border-slate-800">
-                        <td className="px-3 py-2 text-white font-medium">{t.title}</td>
-                        <td className="px-3 py-2 text-slate-300">{t.equipmentId}</td>
-                        <td className="px-3 py-2 text-slate-300">{t.dueDate}</td>
-                        <td className="px-3 py-2"><PriorityBadge priority={t.priority} /></td>
-                        <td className="px-3 py-2"><StatusBadge status={t.status} /></td>
-                        <td className="px-3 py-2 text-slate-300">
-                          {t.assignedTo || <span className="text-slate-500">Unassigned</span>}
-                        </td>
-                        <td className="px-3 py-2">
-                          <Button 
-                            onClick={() => handleViewTask(t)} 
-                            variant="outline" 
-                            size="sm"
+              <div className="overflow-x-auto -mx-2 sm:mx-0">
+                <div className="min-w-[700px] px-2 sm:px-0">
+                  <table className="w-full text-sm">
+                    <thead className="bg-slate-900/60">
+                      <tr className="text-slate-400">
+                        <th className="text-left px-3 py-2 whitespace-nowrap">Task</th>
+                        <th className="text-left px-3 py-2 whitespace-nowrap">Equipment</th>
+                        <th className="text-left px-3 py-2 whitespace-nowrap">Due</th>
+                        <th className="text-left px-3 py-2 whitespace-nowrap">Priority</th>
+                        <th className="text-left px-3 py-2 whitespace-nowrap">Status</th>
+                        <th className="text-left px-3 py-2 whitespace-nowrap">Assigned</th>
+                        <th className="text-left px-3 py-2 whitespace-nowrap">Actions</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {tasks.map(t => (
+                        <tr key={t.id} className="border-t border-slate-800">
+                          <td className="px-3 py-2 text-white font-medium whitespace-nowrap">{t.title}</td>
+                          <td className="px-3 py-2 text-slate-300 whitespace-nowrap">{t.equipmentId}</td>
+                          <td className="px-3 py-2 text-slate-300 whitespace-nowrap">{t.dueDate}</td>
+                          <td className="px-3 py-2"><PriorityBadge priority={t.priority} /></td>
+                          <td className="px-3 py-2"><StatusBadge status={t.status} /></td>
+                          <td className="px-3 py-2 text-slate-300 whitespace-nowrap">
+                            {t.assignedTo || <span className="text-slate-500">Unassigned</span>}
+                          </td>
+                          <td className="px-3 py-2">
+                            <Button 
+                              onClick={() => handleViewTask(t)} 
+                              variant="outline" 
+                              size="sm"
                             className="bg-slate-800 hover:bg-slate-700 text-white border-slate-700"
                           >
                             View
@@ -373,11 +411,12 @@ export default function MaintenancePage() {
                 {error && (
                   <p className="text-xs text-slate-500 mt-2">Showing sample tasks (API unavailable).</p>
                 )}
+                </div>
               </div>
             </TabsContent>
             
             <TabsContent value="matrix">
-              <div className="grid grid-cols-2 gap-4">
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 {/* DO FIRST - Urgent & Important (Quadrant 1) */}
                 <div className="p-4 bg-red-950/20 border-2 border-red-500/30 rounded-lg">
                   <h3 className="text-red-400 font-bold mb-3 flex items-center gap-2">

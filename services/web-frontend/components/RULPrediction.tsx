@@ -6,6 +6,7 @@ import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Clock, TrendingDown, AlertTriangle, CheckCircle, Activity, Calendar, Plus } from 'lucide-react'
 import { mutate } from 'swr'
+import { apiUrl } from '@/lib/api-config'
 
 interface RULData {
   machine_id: string
@@ -37,8 +38,8 @@ export default function RULPrediction({ machineId, compact = false }: RULPredict
       try {
         setLoading(true)
         const url = machineId 
-          ? `http://localhost:8000/api/rul?machine_id=${machineId}`
-          : 'http://localhost:8000/api/rul'
+          ? apiUrl(`/api/rul?machine_id=${machineId}`)
+          : apiUrl('/api/rul')
         
         const response = await fetch(url)
         if (response.ok) {
@@ -70,7 +71,7 @@ export default function RULPrediction({ machineId, compact = false }: RULPredict
       const dueDate = new Date()
       dueDate.setDate(dueDate.getDate() + Math.max(1, data.rul_days - 1))
       
-      const response = await fetch('http://localhost:8000/api/maintenance/tasks', {
+      const response = await fetch(apiUrl('/api/maintenance/tasks'), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -85,7 +86,7 @@ export default function RULPrediction({ machineId, compact = false }: RULPredict
       })
       
       if (response.ok) {
-        await mutate('http://localhost:8000/api/maintenance/tasks')
+        await mutate(apiUrl('/api/maintenance/tasks'))
         alert(`✓ Maintenance task scheduled for ${dueDate.toLocaleDateString()}`)
       } else {
         alert('Failed to create maintenance task')
@@ -180,19 +181,19 @@ export default function RULPrediction({ machineId, compact = false }: RULPredict
         {rulData.map((data) => (
           <div key={data.machine_id} className="border border-slate-800 rounded-lg p-4 space-y-4">
             {/* Header */}
-            <div className="flex items-center justify-between">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
               <div className="flex items-center gap-3">
-                <div className={`p-2 rounded-lg ${getStatusColor(data.status)} bg-opacity-20`}>
+                <div className={`p-2 rounded-lg ${getStatusColor(data.status)} bg-opacity-20 shrink-0`}>
                   {getStatusIcon(data.status)}
                 </div>
-                <div>
-                  <h3 className="font-semibold text-lg">{data.machine_id}</h3>
+                <div className="min-w-0">
+                  <h3 className="font-semibold text-lg truncate">{data.machine_id}</h3>
                   <p className="text-sm text-slate-400">
                     Health: {data.health_score}% • Confidence: {data.confidence}%
                   </p>
                 </div>
               </div>
-              <div className="flex items-center gap-2">
+              <div className="flex items-center gap-2 shrink-0">
                 <Badge className={getStatusColor(data.status)}>
                   {data.status}
                 </Badge>
@@ -215,7 +216,7 @@ export default function RULPrediction({ machineId, compact = false }: RULPredict
             </div>
 
             {/* RUL Display */}
-            <div className="grid grid-cols-2 gap-4">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
               <div className={`p-4 rounded-lg border ${getUrgencyColor(data.urgency)}`}>
                 <div className="flex items-center gap-2 mb-2">
                   <Clock className="w-4 h-4" />
@@ -278,14 +279,14 @@ export default function RULPrediction({ machineId, compact = false }: RULPredict
             </div>
 
             {/* Sensor Readings */}
-            <div className="grid grid-cols-2 gap-3 text-sm">
-              <div className="flex items-center justify-between p-2 bg-slate-900/40 rounded">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-sm">
+              <div className="flex items-center justify-between p-3 bg-slate-900/40 rounded">
                 <span className="text-slate-400">Avg Vibration</span>
                 <span className={`font-semibold ${data.avg_vibration > 75 ? 'text-red-400' : 'text-white'}`}>
                   {data.avg_vibration}
                 </span>
               </div>
-              <div className="flex items-center justify-between p-2 bg-slate-900/40 rounded">
+              <div className="flex items-center justify-between p-3 bg-slate-900/40 rounded">
                 <span className="text-slate-400">Avg Temperature</span>
                 <span className={`font-semibold ${data.avg_temperature > 70 ? 'text-red-400' : 'text-white'}`}>
                   {data.avg_temperature}°C

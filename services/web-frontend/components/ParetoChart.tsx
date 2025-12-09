@@ -4,6 +4,7 @@ import { useState, useEffect } from 'react'
 import { Card, CardHeader, CardTitle, CardContent, CardDescription } from '@/components/ui/card'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { BarChart3, TrendingUp, DollarSign } from 'lucide-react'
+import { apiUrl } from '@/lib/api-config'
 
 interface ParetoData {
   factor: string
@@ -34,7 +35,7 @@ export default function ParetoChart({
     const fetchData = async () => {
       try {
         setLoading(true)
-        let url = `http://localhost:8000/api/pareto/${type}?days=${timeframe}`
+        let url = apiUrl(`/api/pareto/${type}?days=${timeframe}`)
         if (machineId && type === 'anomalies') {
           url += `&machine_id=${machineId}`
         }
@@ -66,18 +67,18 @@ export default function ParetoChart({
 
   return (
     <Card className="border-slate-800">
-      <CardHeader>
-        <div className="flex items-center justify-between">
+      <CardHeader className="pb-4">
+        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
           <div>
-            <CardTitle className="flex items-center gap-2">
-              <BarChart3 className="w-5 h-5 text-purple-500" />
-              {title || defaultTitle}
+            <CardTitle className="flex items-center gap-2 text-base sm:text-lg">
+              <BarChart3 className="w-5 h-5 text-purple-500 shrink-0" />
+              <span className="break-words">{title || defaultTitle}</span>
             </CardTitle>
-            <CardDescription className="mt-1">
+            <CardDescription className="mt-1 text-xs sm:text-sm">
               Pareto Analysis: 80% of issues come from 20% of causes
             </CardDescription>
           </div>
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-2 shrink-0">
             <label className="text-xs text-slate-400">Timeframe:</label>
             <Select value={timeframe} onValueChange={setTimeframe}>
               <SelectTrigger className="w-[120px] h-8 bg-slate-900/60 border-slate-800 text-white text-xs">
@@ -115,96 +116,98 @@ export default function ParetoChart({
             )}
 
             {/* Chart */}
-            <div className="relative h-80 flex items-end justify-between gap-2 border-b-2 border-l-2 border-r-2 border-slate-700 p-4 bg-slate-900/20">
-              {/* 80% Reference Line - Horizontal */}
-              <div className="absolute left-0 right-0 border-t-2 border-dashed border-red-500/60 pointer-events-none" 
-                   style={{ bottom: 'calc(80% + 1rem)' }}>
-                <span className="absolute -right-2 -top-3 text-xs font-bold text-red-400 bg-slate-900 px-1">80%</span>
-              </div>
+            <div className="overflow-x-auto pb-4">
+              <div className="min-w-[600px] relative h-80 flex items-end justify-between gap-2 border-b-2 border-l-2 border-r-2 border-slate-700 p-4 bg-slate-900/20 mx-12">
+                {/* 80% Reference Line - Horizontal */}
+                <div className="absolute left-0 right-0 border-t-2 border-dashed border-red-500/60 pointer-events-none" 
+                     style={{ bottom: 'calc(80% + 1rem)' }}>
+                  <span className="absolute -right-2 -top-3 text-xs font-bold text-red-400 bg-slate-900 px-1">80%</span>
+                </div>
 
-              {data.map((item, idx) => {
-                const barHeight = (item.count / maxCount) * 100
-                const linePoint = item.cumulative
-                const isVital = item.cumulative <= 80 // Part of the "vital 20%"
-                
-                return (
-                  <div key={idx} className="flex-1 relative group">
-                    {/* Bar */}
-                    <div className="relative h-full flex flex-col justify-end items-center">
-                      {/* Percentage label on top */}
-                      <div className="absolute -top-8 text-xs font-semibold text-slate-300 opacity-0 group-hover:opacity-100 transition-opacity">
-                        {item.percentage}%
-                      </div>
-                      
-                      {/* Count label */}
-                      <div className="absolute -top-14 text-xs font-bold text-white bg-slate-800 px-1 rounded opacity-0 group-hover:opacity-100 transition-opacity">
-                        {item.count}
-                      </div>
+                {data.map((item, idx) => {
+                  const barHeight = (item.count / maxCount) * 100
+                  const linePoint = item.cumulative
+                  const isVital = item.cumulative <= 80 // Part of the "vital 20%"
+                  
+                  return (
+                    <div key={idx} className="flex-1 relative group">
+                      {/* Bar */}
+                      <div className="relative h-full flex flex-col justify-end items-center">
+                        {/* Percentage label on top */}
+                        <div className="absolute -top-8 text-xs font-semibold text-slate-300 opacity-0 group-hover:opacity-100 transition-opacity">
+                          {item.percentage}%
+                        </div>
+                        
+                        {/* Count label */}
+                        <div className="absolute -top-14 text-xs font-bold text-white bg-slate-800 px-1 rounded opacity-0 group-hover:opacity-100 transition-opacity">
+                          {item.count}
+                        </div>
 
-                      {/* Bar - Color coded: Red for vital 20%, Blue for trivial 80% */}
-                      <div
-                        className={`w-full rounded-t transition-all cursor-pointer ${
-                          isVital 
-                            ? 'bg-linear-to-t from-red-600 to-red-400 hover:from-red-500 hover:to-red-300' 
-                            : 'bg-linear-to-t from-blue-600 to-blue-400 hover:from-blue-500 hover:to-blue-300'
-                        }`}
-                        style={{ height: `${barHeight}%` }}
-                        title={`${item.factor}: ${item.count} occurrences (${item.percentage}%)${item.cost_estimate ? `\nCost: $${item.cost_estimate.toLocaleString()}` : ''}\nCumulative: ${item.cumulative}%`}
-                      />
-                      
-                      {/* Cumulative percentage point */}
-                      <div className="absolute -right-1 w-3 h-3 bg-orange-500 rounded-full border-2 border-slate-900 shadow-lg" 
-                           style={{ bottom: `${linePoint}%` }}
-                           title={`Cumulative: ${item.cumulative}%`} 
-                      />
+                        {/* Bar - Color coded: Red for vital 20%, Blue for trivial 80% */}
+                        <div
+                          className={`w-full rounded-t transition-all cursor-pointer ${
+                            isVital 
+                              ? 'bg-linear-to-t from-red-600 to-red-400 hover:from-red-500 hover:to-red-300' 
+                              : 'bg-linear-to-t from-blue-600 to-blue-400 hover:from-blue-500 hover:to-blue-300'
+                          }`}
+                          style={{ height: `${barHeight}%` }}
+                          title={`${item.factor}: ${item.count} occurrences (${item.percentage}%)${item.cost_estimate ? `\nCost: $${item.cost_estimate.toLocaleString()}` : ''}\nCumulative: ${item.cumulative}%`}
+                        />
+                        
+                        {/* Cumulative percentage point */}
+                        <div className="absolute -right-1 w-3 h-3 bg-orange-500 rounded-full border-2 border-slate-900 shadow-lg" 
+                             style={{ bottom: `${linePoint}%` }}
+                             title={`Cumulative: ${item.cumulative}%`} 
+                        />
+                      </div>
                     </div>
-                  </div>
-                )
-              })}
-              
-              {/* Cumulative curve (orange line) */}
-              <svg className="absolute inset-0 pointer-events-none" style={{ width: '100%', height: '100%' }}>
-                <polyline
-                  points={data.map((item, idx) => {
-                    const x = ((idx + 0.5) / data.length) * 100
-                    const y = 100 - item.cumulative
-                    return `${x}%,${y}%`
-                  }).join(' ')}
-                  fill="none"
-                  stroke="rgb(249, 115, 22)"
-                  strokeWidth="3"
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                />
-              </svg>
+                  )
+                })}
+                
+                {/* Cumulative curve (orange line) */}
+                <svg className="absolute inset-0 pointer-events-none" style={{ width: '100%', height: '100%' }}>
+                  <polyline
+                    points={data.map((item, idx) => {
+                      const x = ((idx + 0.5) / data.length) * 100
+                      const y = 100 - item.cumulative
+                      return `${x}%,${y}%`
+                    }).join(' ')}
+                    fill="none"
+                    stroke="rgb(249, 115, 22)"
+                    strokeWidth="3"
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                  />
+                </svg>
 
-              {/* Left Y-axis labels (Bar counts) */}
-              <div className="absolute -left-12 inset-y-0 flex flex-col justify-between text-xs text-slate-500 pr-2">
-                <span className="text-right">{maxCount}</span>
-                <span className="text-right">{Math.round(maxCount * 0.75)}</span>
-                <span className="text-right">{Math.round(maxCount * 0.5)}</span>
-                <span className="text-right">{Math.round(maxCount * 0.25)}</span>
-                <span className="text-right">0</span>
-              </div>
+                {/* Left Y-axis labels (Bar counts) */}
+                <div className="absolute -left-12 inset-y-0 flex flex-col justify-between text-xs text-slate-500 pr-2">
+                  <span className="text-right">{maxCount}</span>
+                  <span className="text-right">{Math.round(maxCount * 0.75)}</span>
+                  <span className="text-right">{Math.round(maxCount * 0.5)}</span>
+                  <span className="text-right">{Math.round(maxCount * 0.25)}</span>
+                  <span className="text-right">0</span>
+                </div>
 
-              {/* Right Y-axis labels (Cumulative %) */}
-              <div className="absolute -right-12 inset-y-0 flex flex-col justify-between text-xs text-orange-400 pl-2">
-                <span>100%</span>
-                <span>75%</span>
-                <span>50%</span>
-                <span>25%</span>
-                <span>0%</span>
+                {/* Right Y-axis labels (Cumulative %) */}
+                <div className="absolute -right-12 inset-y-0 flex flex-col justify-between text-xs text-orange-400 pl-2">
+                  <span>100%</span>
+                  <span>75%</span>
+                  <span>50%</span>
+                  <span>25%</span>
+                  <span>0%</span>
+                </div>
               </div>
             </div>
 
             {/* Legend with Color-Coded Categories */}
-            <div className="space-y-2">
+            <div className="space-y-3">
               {data.map((item, idx) => {
                 const isVital = item.cumulative <= 80
                 return (
-                  <div key={idx} className="flex items-center justify-between text-sm">
-                    <div className="flex items-center gap-2 flex-1">
-                      <div className={`w-3 h-3 rounded ${isVital ? 'bg-red-500' : 'bg-blue-500'}`} />
+                  <div key={idx} className="flex flex-col sm:flex-row sm:items-center sm:justify-between text-sm gap-2 p-2 bg-slate-900/30 rounded-lg">
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <div className={`w-3 h-3 rounded shrink-0 ${isVital ? 'bg-red-500' : 'bg-blue-500'}`} />
                       <span className="text-slate-300 font-medium">{item.factor}</span>
                       {isVital && (
                         <span className="text-xs px-2 py-0.5 bg-red-500/20 text-red-400 border border-red-500/30 rounded">
@@ -212,13 +215,13 @@ export default function ParetoChart({
                         </span>
                       )}
                     </div>
-                    <div className="flex items-center gap-4">
+                    <div className="flex items-center gap-3 sm:gap-4 flex-wrap text-xs sm:text-sm pl-5 sm:pl-0">
                       <span className="text-slate-400">{item.count} occurrences</span>
-                      <span className="text-slate-400 text-xs">({item.percentage}%)</span>
+                      <span className="text-slate-400">({item.percentage}%)</span>
                       {item.cost_estimate && (
                         <span className="text-green-400 font-semibold">${item.cost_estimate.toLocaleString()}</span>
                       )}
-                      <span className="text-orange-400 font-semibold w-20 text-right flex items-center gap-1">
+                      <span className="text-orange-400 font-semibold flex items-center gap-1">
                         <span className="text-xs text-slate-500">Σ</span>{item.cumulative}%
                       </span>
                     </div>
@@ -271,7 +274,7 @@ export default function ParetoChart({
             </div>
 
             {/* Chart Legend Key */}
-            <div className="mt-3 flex items-center justify-center gap-6 text-xs">
+            <div className="mt-3 flex flex-wrap items-center justify-center gap-3 sm:gap-6 text-xs">
               <div className="flex items-center gap-2">
                 <div className="w-4 h-4 bg-red-500 rounded" />
                 <span className="text-slate-400">Vital Few (≤80%)</span>

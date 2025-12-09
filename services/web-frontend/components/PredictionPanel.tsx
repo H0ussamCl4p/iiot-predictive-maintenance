@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from 'react'
 import { Activity, TrendingUp, Clock, AlertTriangle, CheckCircle, Zap } from 'lucide-react'
+import { apiUrl } from '@/lib/api-config'
 
 interface PredictionData {
   timestamp: string
@@ -45,7 +46,7 @@ export default function PredictionPanel({ equipmentId }: { equipmentId?: string 
       try {
         // First fetch live data for the machine
         const machineId = equipmentId || 'MACHINE_002'
-        const liveResponse = await fetch(`http://localhost:8000/api/live?machine_id=${machineId}`)
+        const liveResponse = await fetch(apiUrl(`/api/live?machine_id=${machineId}`))
         
         if (!liveResponse.ok) {
           setError('Failed to fetch live data')
@@ -56,7 +57,7 @@ export default function PredictionPanel({ equipmentId }: { equipmentId?: string 
         const liveData = await liveResponse.json()
         
         // Use live data for prediction with reasonable Age and Quantity estimates
-        const response = await fetch('http://localhost:8000/predict', {
+        const response = await fetch(apiUrl('/predict'), {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
