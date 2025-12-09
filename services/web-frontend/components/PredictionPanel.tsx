@@ -188,7 +188,7 @@ export default function PredictionPanel({ equipmentId }: { equipmentId?: string 
               <span className="text-white font-semibold">{current_state.anomaly_score}/100</span>
             </div>
 
-            {current_state.warnings.length > 0 && (
+            {Array.isArray(current_state.warnings) && current_state.warnings.length > 0 && (
               <div className="mt-4 space-y-2">
                 <p className="text-sm font-semibold text-slate-300">Warnings:</p>
                 {current_state.warnings.map((warning, idx) => (
