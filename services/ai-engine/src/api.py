@@ -141,6 +141,20 @@ except Exception as e:
 # This service only validates JWT tokens for protected endpoints
 # -----------------------------
 
+# Import model registry and enhanced anomaly detection
+try:
+    from src.model_registry import (
+        ModelRegistry, ModelType, ModelStatus, ModelMetrics, get_registry
+    )
+    from src.enhanced_anomaly_detection import (
+        EnsembleAnomalyDetector, AnomalyPrediction
+    )
+    ENHANCED_ML_AVAILABLE = True
+    print("✓ Enhanced ML modules loaded")
+except ImportError as e:
+    ENHANCED_ML_AVAILABLE = False
+    print(f"⚠️  Enhanced ML modules not available: {e}")
+
 
 # Pydantic models for request bodies
 class TrainRequest(BaseModel):
@@ -2662,7 +2676,7 @@ async def predict_combined(request: PredictionRequest):
 @app.get("/models/status")
 async def get_models_status():
     """Check which models are available"""
-    return {
+    status = {
         "anomaly_detection_model": {
             "available": os.path.exists(MODEL_PATH),
             "path": MODEL_PATH,
@@ -2674,8 +2688,271 @@ async def get_models_status():
             "path": PREDICTIVE_MODEL_PATH,
             "type": "Random Forest Regressor",
             "purpose": "Future failure prediction"
-        }
+        },
+        "enhanced_ml_available": ENHANCED_ML_AVAILABLE
     }
+    
+    # Add registry info if available
+    if ENHANCED_ML_AVAILABLE:
+        try:
+            registry = get_registry()
+            status["model_registry"] = registry.get_registry_summary()
+        except Exception as e:
+            status["model_registry"] = {"error": str(e)}
+    
+    return status
+
+
+# =============================================================================
+# MODEL REGISTRY API ENDPOINTS
+# =============================================================================
+
+@app.get("/api/models/registry")
+async def get_model_registry():
+    """Get summary of all registered models"""
+    if not ENHANCED_ML_AVAILABLE:
+        raise HTTPException(status_code=503, detail="Enhanced ML modules not available")
+    
+    try:
+        registry = get_registry()
+        return {
+            "success": True,
+            "registry": registry.get_registry_summary()
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/models/{model_type}/versions")
+async def list_model_versions(model_type: str):
+    """List all versions for a model type"""
+    if not ENHANCED_ML_AVAILABLE:
+        raise HTTPException(status_code=503, detail="Enhanced ML modules not available")
+    
+    try:
+        mt = ModelType(model_type)
+        registry = get_registry()
+        versions = registry.list_versions(mt)
+        return {
+            "success": True,
+            "model_type": model_type,
+            "versions": versions
+        }
+    except ValueError:
+        raise HTTPException(status_code=400, detail=f"Invalid model type: {model_type}")
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/api/models/{model_type}/promote/{version}")
+async def promote_model_version(model_type: str, version: str):
+    """Promote a model version to ACTIVE status"""
+    if not ENHANCED_ML_AVAILABLE:
+        raise HTTPException(status_code=503, detail="Enhanced ML modules not available")
+    
+    try:
+        mt = ModelType(model_type)
+        registry = get_registry()
+        success = registry.promote_model(mt, version)
+        
+        if success:
+            return {
+                "success": True,
+                "message": f"Model {model_type} v{version} promoted to ACTIVE"
+            }
+        else:
+            raise HTTPException(status_code=404, detail=f"Version {version} not found")
+    except ValueError:
+        raise HTTPException(status_code=400, detail=f"Invalid model type: {model_type}")
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/api/models/{model_type}/rollback")
+async def rollback_model(model_type: str, to_version: Optional[str] = None):
+    """Rollback to a previous model version"""
+    if not ENHANCED_ML_AVAILABLE:
+        raise HTTPException(status_code=503, detail="Enhanced ML modules not available")
+    
+    try:
+        mt = ModelType(model_type)
+        registry = get_registry()
+        success = registry.rollback(mt, to_version)
+        
+        if success:
+            return {
+                "success": True,
+                "message": f"Rolled back {model_type} to {'previous version' if not to_version else f'v{to_version}'}"
+            }
+        else:
+            raise HTTPException(status_code=404, detail="No version to rollback to")
+    except ValueError:
+        raise HTTPException(status_code=400, detail=f"Invalid model type: {model_type}")
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+class ABTestConfig(BaseModel):
+    allocations: Dict[str, float]  # version -> traffic percentage
+
+
+@app.post("/api/models/{model_type}/ab-test")
+async def configure_ab_test(model_type: str, config: ABTestConfig):
+    """Configure A/B test traffic allocation"""
+    if not ENHANCED_ML_AVAILABLE:
+        raise HTTPException(status_code=503, detail="Enhanced ML modules not available")
+    
+    try:
+        mt = ModelType(model_type)
+        registry = get_registry()
+        success = registry.set_ab_traffic(mt, config.allocations)
+        
+        return {
+            "success": success,
+            "message": f"A/B test configured for {model_type}",
+            "allocations": config.allocations
+        }
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/api/models/train")
+async def trigger_training(
+    model_type: Optional[str] = "all",
+    contamination: Optional[float] = 0.05
+):
+    """Trigger model training (runs in background)"""
+    if not ENHANCED_ML_AVAILABLE:
+        raise HTTPException(status_code=503, detail="Enhanced ML modules not available")
+    
+    try:
+        import subprocess
+        import threading
+        
+        def run_training():
+            try:
+                subprocess.run(
+                    ["python", "-m", "src.train_enhanced"],
+                    cwd="/app",
+                    capture_output=True,
+                    timeout=300  # 5 minute timeout
+                )
+            except Exception as e:
+                print(f"Training failed: {e}")
+        
+        # Run in background thread
+        thread = threading.Thread(target=run_training, daemon=True)
+        thread.start()
+        
+        return {
+            "success": True,
+            "message": "Training started in background",
+            "note": "Check /models/status for completion"
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/models/{model_type}/metrics")
+async def get_model_metrics(model_type: str, version: Optional[str] = None):
+    """Get performance metrics for a model"""
+    if not ENHANCED_ML_AVAILABLE:
+        raise HTTPException(status_code=503, detail="Enhanced ML modules not available")
+    
+    try:
+        mt = ModelType(model_type)
+        registry = get_registry()
+        
+        if version:
+            result = registry.get_model_by_version(mt, version)
+        else:
+            result = registry.get_active_model(mt)
+        
+        if not result:
+            raise HTTPException(status_code=404, detail="Model not found")
+        
+        _, _, model_version = result
+        
+        return {
+            "success": True,
+            "model_type": model_type,
+            "version": model_version.version,
+            "status": model_version.status.value,
+            "algorithm": model_version.algorithm,
+            "features": model_version.features,
+            "metrics": model_version.metrics.to_dict(),
+            "created_at": model_version.created_at,
+            "hyperparameters": model_version.hyperparameters
+        }
+    except ValueError:
+        raise HTTPException(status_code=400, detail=f"Invalid model type: {model_type}")
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# =============================================================================
+# ENHANCED PREDICTION ENDPOINT
+# =============================================================================
+
+@app.post("/api/predict/enhanced")
+async def predict_enhanced(request: PredictionRequest):
+    """
+    Enhanced prediction using ensemble anomaly detection.
+    
+    Returns detailed results from multiple algorithms with voting.
+    """
+    if not ENHANCED_ML_AVAILABLE:
+        raise HTTPException(status_code=503, detail="Enhanced ML modules not available")
+    
+    try:
+        input_data = request.data
+        equipment_id = request.equipmentId
+        
+        # Try to load ensemble detector
+        ensemble_path = "/app/models/ensemble_anomaly_detector.pkl"
+        
+        if not os.path.exists(ensemble_path):
+            raise HTTPException(
+                status_code=503, 
+                detail="Ensemble model not trained. Run /api/models/train first."
+            )
+        
+        detector = EnsembleAnomalyDetector.load(ensemble_path)
+        
+        # Prepare input
+        features = detector.feature_names
+        X = np.array([[input_data.get(f, 0) for f in features]])
+        
+        # Get prediction
+        prediction = detector.predict(X)
+        
+        return {
+            "success": True,
+            "equipment_id": equipment_id,
+            "input_data": input_data,
+            "prediction": {
+                "is_anomaly": prediction.is_anomaly,
+                "anomaly_score": prediction.anomaly_score,
+                "confidence": prediction.confidence,
+                "risk_level": prediction.risk_level,
+                "algorithm_votes": prediction.algorithm_votes,
+                "contributing_factors": prediction.contributing_factors
+            },
+            "ensemble_info": {
+                "algorithms": list(prediction.algorithm_votes.keys()),
+                "voting_threshold": detector.voting_threshold,
+                "weights": detector.weights
+            }
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Enhanced prediction failed: {str(e)}")
 
 
 if __name__ == "__main__":
