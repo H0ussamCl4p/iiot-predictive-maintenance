@@ -1,5 +1,7 @@
 // Animated status indicator component
 
+import { Badge } from '@/components/ui/badge'
+
 interface StatusBadgeProps {
   status: 'NORMAL' | 'WARNING' | 'ANOMALY';
   size?: 'sm' | 'md' | 'lg';
@@ -36,11 +38,9 @@ export default function StatusBadge({ status, size = 'md' }: StatusBadgeProps) {
   const config = statusConfig[status]
 
   return (
-    <div className={`inline-flex items-center space-x-2 ${sizeClasses[size]} rounded-full border ${config.border} bg-industrial-900/50 backdrop-blur-sm`}>
-      <div className={`relative w-2 h-2 ${config.color} rounded-full`}>
-        <div className={`absolute inset-0 ${config.color} rounded-full animate-ping opacity-75`}></div>
-      </div>
-      <span className={`font-semibold ${config.text}`}>{status}</span>
-    </div>
+    <Badge variant="outline" className={`inline-flex items-center space-x-2 ${sizeClasses[size]} ${config.text} border ${config.border}`}>
+      <span className={`relative w-2 h-2 ${config.color} rounded-full`}></span>
+      <span className={`font-semibold`}>{status}</span>
+    </Badge>
   )
 }

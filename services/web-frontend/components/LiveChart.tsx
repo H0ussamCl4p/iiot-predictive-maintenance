@@ -2,7 +2,7 @@
 
 'use client'
 
-import { AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts'
+import { AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, ReferenceLine, Legend } from 'recharts'
 import { format } from 'date-fns'
 import type { HistoricalData } from '@/types'
 
@@ -14,9 +14,24 @@ export default function LiveChart({ data }: LiveChartProps) {
   // Format data for Recharts
   const chartData = data.map(point => ({
     time: format(new Date(point.timestamp), 'HH:mm:ss'),
-    score: point.score,
+    // Convert to an easy-to-understand percentage (0-100)
+    score: Math.max(0, Math.min(100, Math.round((point.score || 0) * 100))),
     status: point.status
   }))
+
+  const renderTooltip = ({ active, payload, label }: any) => {
+    if (active && payload && payload.length) {
+      const value = payload[0].value
+      const status = data[payload[0].dataKeyIndex || 0]?.status || ''
+      return (
+        <div className="p-2 bg-slate-900/90 border border-slate-700 rounded-md">
+          <div className="text-xs text-slate-400">{label}</div>
+          <div className="text-sm text-white">AI Health: {value}%</div>
+        </div>
+      )
+    }
+    return null
+  }
 
   return (
     <div className="w-full h-full">
@@ -39,22 +54,20 @@ export default function LiveChart({ data }: LiveChartProps) {
             stroke="#64748b"
             tick={{ fill: '#94a3b8' }}
             tickLine={{ stroke: '#334155' }}
-            label={{ value: 'AI Score', angle: -90, position: 'insideLeft', fill: '#94a3b8' }}
+            domain={[0, 100]}
+            label={{ value: 'AI Health (%)', angle: -90, position: 'insideLeft', fill: '#94a3b8' }}
           />
-          <Tooltip 
-            contentStyle={{
-              backgroundColor: '#1e293b',
-              border: '1px solid #334155',
-              borderRadius: '8px',
-              color: '#f1f5f9'
-            }}
-            labelStyle={{ color: '#94a3b8' }}
-          />
+          <Tooltip content={renderTooltip} />
+          <Legend wrapperStyle={{ color: '#94a3b8' }} />
+          {/* Threshold bands */}
+          <ReferenceLine y={10} label={{ value: 'Anomaly', position: 'right', fill: '#ef4444', fontSize: 12 }} stroke="#ef4444" strokeDasharray="4 4" />
+          <ReferenceLine y={30} label={{ value: 'Warning', position: 'right', fill: '#f59e0b', fontSize: 12 }} stroke="#f59e0b" strokeDasharray="4 4" />
           <Area 
             type="monotone" 
             dataKey="score" 
             stroke="#10b981" 
             strokeWidth={2}
+            isAnimationActive={false}
             fillOpacity={1} 
             fill="url(#scoreGradient)" 
           />

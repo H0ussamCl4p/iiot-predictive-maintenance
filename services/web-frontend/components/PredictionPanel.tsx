@@ -34,7 +34,7 @@ interface PredictionData {
   }
 }
 
-export default function PredictionPanel() {
+export default function PredictionPanel({ equipmentId }: { equipmentId?: string }) {
   const [prediction, setPrediction] = useState<PredictionData | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
@@ -53,7 +53,8 @@ export default function PredictionPanel() {
               Temperature: 45,
               Age: 12,
               Quantity: 42000
-            }
+            },
+            equipmentId: equipmentId
           })
         })
 
@@ -75,7 +76,7 @@ export default function PredictionPanel() {
     const interval = setInterval(fetchPrediction, 5000)
 
     return () => clearInterval(interval)
-  }, [])
+  }, [equipmentId])
 
   if (loading) {
     return (

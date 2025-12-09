@@ -23,16 +23,20 @@ try:
         
         # Temp also rises slowly
         temp = 45 + (wear_factor * 0.5) + random.uniform(-0.2, 0.2)
+        # Humidity varies mildly around 50%, small drift with wear
+        humidity = 50 + (wear_factor * 0.1) + random.uniform(-1.5, 1.5)
+        humidity = max(0, min(100, humidity))
         
         payload = {
             "timestamp": time.time(),
             "machine_id": "Press_01",
             "vibration": round(vibration, 2),
-            "temperature": round(temp, 2)
+            "temperature": round(temp, 2),
+            "humidity": round(humidity, 2)
         }
 
         client.publish(TOPIC, json.dumps(payload))
-        print(f"Time: {tick}s | Vib: {vibration:.2f} | Temp: {temp:.2f} | Wear Level: {wear_factor:.1f}")
+        print(f"Time: {tick}s | Vib: {vibration:.2f} | Temp: {temp:.2f} | Hum: {humidity:.2f}% | Wear Level: {wear_factor:.1f}")
         
         tick += 1
         time.sleep(1)

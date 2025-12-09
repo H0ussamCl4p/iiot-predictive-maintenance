@@ -27,6 +27,75 @@ MEASUREMENT = "machine_telemetry"
 MODEL_PATH = "/app/models/anomaly_model.pkl"
 PREDICTIVE_MODEL_PATH = "/app/models/predictive_model.pkl"
 
+# Expected sensor ranges (can be overridden via environment)
+EXPECTED_MAX_VIBRATION = float(os.getenv("EXPECTED_MAX_VIBRATION", "100.0"))
+EXPECTED_MAX_TEMPERATURE = float(os.getenv("EXPECTED_MAX_TEMPERATURE", "100.0"))
+_calibrated_max_vibration: Optional[float] = None
+_calibrated_max_temperature: Optional[float] = None
+_calibration_ts: Optional[datetime] = None
+
+def calibrate_expected_ranges() -> None:
+    """Calibrate expected maxima from recent InfluxDB data (last 2h)."""
+    global _calibrated_max_vibration, _calibrated_max_temperature, _calibration_ts
+    if not influx_client:
+        return
+    try:
+        query = f'''
+            SELECT max("vibration") as max_vibration,
+                   max("temperature") as max_temperature
+            FROM "{MEASUREMENT}"
+            WHERE time > now() - 2h
+        '''
+        result = influx_client.query(query)
+        points = list(result.get_points())
+        if points:
+            mv = points[0].get('max_vibration')
+            mt = points[0].get('max_temperature')
+            if mv is not None and mt is not None:
+                _calibrated_max_vibration = float(mv)
+                _calibrated_max_temperature = float(mt)
+                _calibration_ts = datetime.utcnow()
+    except Exception:
+        # Silent fail; keep previous values
+        pass
+
+def estimate_score(vibration: float, temperature: float) -> float:
+    """Heuristic score in [-1, 1] based on normalized vib/temp.
+    Higher vib/temp lowers the score. Uses expected max ranges for normalization.
+    """
+    try:
+        # Optionally refresh calibration every 5 minutes
+        if _calibration_ts is None or (datetime.utcnow() - _calibration_ts).total_seconds() > 300:
+            calibrate_expected_ranges()
+
+        max_vib = _calibrated_max_vibration if (_calibrated_max_vibration and _calibrated_max_vibration > 0) else EXPECTED_MAX_VIBRATION
+        max_temp = _calibrated_max_temperature if (_calibrated_max_temperature and _calibrated_max_temperature > 0) else EXPECTED_MAX_TEMPERATURE
+
+        # Normalize to [0, 1] using maxima; guard against zero
+        vib_norm = 0.0 if max_vib <= 0 else min(max(vibration / max_vib, 0.0), 1.0)
+        temp_norm = 0.0 if max_temp <= 0 else min(max(temperature / max_temp, 0.0), 1.0)
+        # Weighted impact: vibration more important
+        impact = 0.6 * vib_norm + 0.4 * temp_norm
+        # Convert impact to score: high impact => lower score
+        score = 1.0 - impact
+        return float(max(-1.0, min(1.0, score)))
+    except Exception:
+        return 0.0
+
+def normalize_score(score: float) -> float:
+    """Normalize any incoming score to [0, 1] for UI consistency.
+    If a model outputs in [-1, 1], map to [0, 1]; otherwise clamp."""
+    try:
+        if score <= 1.0 and score >= -1.0:
+            norm = (score + 1.0) / 2.0
+        else:
+            norm = score
+        if np.isnan(norm):
+            return 0.0
+        return float(max(0.0, min(1.0, norm)))
+    except Exception:
+        return 0.0
+
 # Initialize FastAPI
 app = FastAPI(
     title="IIoT Predictive Maintenance API",
@@ -151,6 +220,77 @@ def calculate_health_score(vibration: float, temperature: float, ai_score: float
         "maintenance_urgency": "immediate" if days_until_maintenance < 1 else "soon" if days_until_maintenance < 3 else "scheduled"
     }
 
+# -----------------------------
+# Equipment & Maintenance APIs
+# -----------------------------
+
+@app.get("/api/equipment")
+def get_equipment() -> list[dict]:
+    """Return a list of equipment with basic metadata."""
+    return [
+        {"id": "PRESS_001", "name": "Hydraulic Press", "type": "Press", "status": "ONLINE", "location": "Line A"},
+        {"id": "CONV_014", "name": "Main Conveyor", "type": "Conveyor", "status": "MAINTENANCE", "location": "Dock"},
+        {"id": "MOTOR_207", "name": "Cooling Motor", "type": "Motor", "status": "OFFLINE", "location": "Utility"},
+    ]
+
+@app.get("/api/maintenance/tasks")
+def get_maintenance_tasks() -> list[dict]:
+    """Return upcoming maintenance tasks with priorities and statuses."""
+    return [
+        {"id": "T-1001", "equipmentId": "PRESS_001", "title": "Lubrication & inspection", "dueDate": "2025-12-15", "priority": "MEDIUM", "status": "PLANNED"},
+        {"id": "T-1002", "equipmentId": "CONV_014", "title": "Belt tension check", "dueDate": "2025-12-12", "priority": "HIGH", "status": "IN_PROGRESS"},
+        {"id": "T-1003", "equipmentId": "MOTOR_207", "title": "Bearing replacement", "dueDate": "2025-12-20", "priority": "LOW", "status": "PLANNED"},
+    ]
+
+@app.get("/api/shifts")
+def get_shifts() -> list[dict]:
+    """Return shift schedule with operators and production metrics."""
+    return [
+        {"id": "S-1", "name": "Morning Shift", "startTime": "06:00", "endTime": "14:00", "operator": "John Smith", "status": "ACTIVE", "productionCount": 1247, "downtime": 12, "efficiency": 94.8},
+        {"id": "S-2", "name": "Afternoon Shift", "startTime": "14:00", "endTime": "22:00", "operator": "Mike Johnson", "status": "SCHEDULED", "productionCount": 0, "downtime": 0, "efficiency": 0},
+        {"id": "S-3", "name": "Night Shift", "startTime": "22:00", "endTime": "06:00", "operator": "Sarah Williams", "status": "COMPLETED", "productionCount": 1156, "downtime": 18, "efficiency": 92.3},
+    ]
+
+@app.get("/api/production/oee")
+def get_oee(equipmentId: Optional[str] = None) -> dict:
+    """Calculate OEE (Overall Equipment Effectiveness) metrics."""
+    # Mock OEE calculation - in production would pull from real data
+    availability = 94.5
+    performance = 96.2
+    quality = 98.8
+    oee = (availability * performance * quality) / 10000
+    
+    return {
+        "oee": round(oee, 2),
+        "availability": round(availability, 2),
+        "performance": round(performance, 2),
+        "quality": round(quality, 2),
+        "target": 85.0,
+        "status": "EXCELLENT" if oee >= 85 else "GOOD" if oee >= 75 else "NEEDS_IMPROVEMENT"
+    }
+
+@app.get("/api/reports")
+def get_reports() -> list[dict]:
+    """Return available reports for download."""
+    return [
+        {"id": "R-001", "title": "Daily Production Report", "type": "DAILY", "date": "2025-12-09", "size": "2.4 MB", "status": "READY"},
+        {"id": "R-002", "title": "Weekly Maintenance Summary", "type": "WEEKLY", "date": "2025-12-08", "size": "8.1 MB", "status": "READY"},
+        {"id": "R-003", "title": "Monthly OEE Analysis", "type": "MONTHLY", "date": "2025-11-30", "size": "15.7 MB", "status": "READY"},
+        {"id": "R-004", "title": "Custom Anomaly Report", "type": "CUSTOM", "date": "2025-12-09", "size": "N/A", "status": "GENERATING"},
+    ]
+
+@app.get("/api/compliance")
+def get_compliance() -> dict:
+    """Return compliance and audit information."""
+    return {
+        "lastAudit": "2025-11-15",
+        "nextReview": "2026-02-15",
+        "complianceScore": 98.5,
+        "standards": ["ISO 9001", "Industry 4.0", "OSHA"],
+        "issues": [],
+        "status": "COMPLIANT"
+    }
+
 
 @app.get("/")
 async def root():
@@ -184,6 +324,7 @@ async def get_live_data():
         query = f'''
             SELECT last("vibration") as vibration,
                    last("temperature") as temperature,
+                   last("humidity") as humidity,
                    last("ai_score") as score
             FROM "{MEASUREMENT}"
             WHERE time > now() - 1h
@@ -209,13 +350,37 @@ async def get_live_data():
         status_result = influx_client.query(status_query)
         
         # Determine status based on AI score
-        score = float(data.get('score', 0))
-        vibration = float(data.get('vibration', 0))
-        temperature = float(data.get('temperature', 0))
+        # Read raw values and guard against None/NaN
+        raw_score = data.get('score', 0)
+        raw_vibration = data.get('vibration', 0)
+        raw_temperature = data.get('temperature', 0)
+        raw_humidity = data.get('humidity', None)
+
+        def _to_float_safe(val, default=0.0):
+            try:
+                if val is None:
+                    return default
+                f = float(val)
+                if np.isnan(f):
+                    return default
+                return f
+            except Exception:
+                return default
+
+        score = _to_float_safe(raw_score, 0.0)
+        vibration = _to_float_safe(raw_vibration, 0.0)
+        temperature = _to_float_safe(raw_temperature, 0.0)
+        humidity = _to_float_safe(raw_humidity, 0.0)
+
+        # Fallback score estimation if missing/zero and we have signals
+        if (raw_score is None or score == 0.0) and (vibration > 0 or temperature > 0):
+            score = estimate_score(vibration, temperature)
+        # Normalize to [0,1]
+        score = normalize_score(score)
         
-        if score < -0.5:
+        if score < 0.1:
             status = "ANOMALY"
-        elif score < 0.1:
+        elif score < 0.3:
             status = "WARNING"
         else:
             status = "NORMAL"
@@ -226,6 +391,7 @@ async def get_live_data():
         return {
             "vibration": round(vibration, 2),
             "temperature": round(temperature, 2),
+            "humidity": round(humidity, 2),
             "score": round(score, 4),
             "status": status,
             "timestamp": datetime.utcnow().isoformat() + "Z",
@@ -261,7 +427,7 @@ async def get_history(limit: int = 50):
     try:
         # Query for historical data
         query = f'''
-            SELECT "vibration", "temperature", "ai_score"
+            SELECT "vibration", "temperature", "humidity", "ai_score"
             FROM "{MEASUREMENT}"
             WHERE time > now() - 1h
             ORDER BY time DESC
@@ -280,20 +446,46 @@ async def get_history(limit: int = 50):
         # Format data for frontend
         history = []
         for point in points:
-            score = float(point.get('ai_score', 0))
+            raw_score = point.get('ai_score', 0)
+            raw_vibration = point.get('vibration', 0)
+            raw_temperature = point.get('temperature', 0)
+            raw_humidity = point.get('humidity', None)
+
+            def _to_float_safe(val, default=0.0):
+                try:
+                    if val is None:
+                        return default
+                    f = float(val)
+                    if np.isnan(f):
+                        return default
+                    return f
+                except Exception:
+                    return default
+
+            score = _to_float_safe(raw_score, 0.0)
+            vibration = _to_float_safe(raw_vibration, 0.0)
+            temperature = _to_float_safe(raw_temperature, 0.0)
+            humidity = _to_float_safe(raw_humidity, 0.0)
+
+            # Fallback score estimation if missing/zero but signals present
+            if (raw_score is None or score == 0.0) and (vibration > 0 or temperature > 0):
+                score = estimate_score(vibration, temperature)
+            # Normalize to [0,1]
+            score = normalize_score(score)
             
             # Determine status
-            if score < -0.5:
+            if score < 0.1:
                 status = "ANOMALY"
-            elif score < 0.1:
+            elif score < 0.3:
                 status = "WARNING"
             else:
                 status = "NORMAL"
             
             history.append({
                 "timestamp": point.get('time'),
-                "vibration": round(float(point.get('vibration', 0)), 2),
-                "temperature": round(float(point.get('temperature', 0)), 2),
+                "vibration": round(vibration, 2),
+                "temperature": round(temperature, 2),
+                "humidity": round(humidity, 2),
                 "score": round(score, 4),
                 "status": status
             })
@@ -308,7 +500,7 @@ async def get_history(limit: int = 50):
 
 
 @app.get("/api/stats")
-async def get_statistics():
+async def get_statistics(equipmentId: Optional[str] = None):
     """
     Get aggregated statistics for the dashboard
     Returns: Summary statistics over the last 24 hours
@@ -373,14 +565,23 @@ async def get_statistics():
         normal_readings = total_readings - anomalies - warnings
         uptime_percentage = (normal_readings / total_readings * 100) if total_readings > 0 else 100
         
+        # Slight per-equipment variation (mock) when scoped
+        vib_adjust = 0.0
+        temp_adjust = 0.0
+        if equipmentId:
+            if equipmentId.endswith("001"):
+                vib_adjust = 1.5
+            elif equipmentId.endswith("014"):
+                temp_adjust = 1.0
+
         return {
             "vibration": {
-                "average": round(float(data.get('avg_vibration', 0)), 2),
-                "max": round(float(data.get('max_vibration', 0)), 2)
+                "average": round(float(data.get('avg_vibration', 0)) + vib_adjust, 2),
+                "max": round(float(data.get('max_vibration', 0)) + vib_adjust, 2)
             },
             "temperature": {
-                "average": round(float(data.get('avg_temperature', 0)), 2),
-                "max": round(float(data.get('max_temperature', 0)), 2)
+                "average": round(float(data.get('avg_temperature', 0)) + temp_adjust, 2),
+                "max": round(float(data.get('max_temperature', 0)) + temp_adjust, 2)
             },
             "ai_score": {
                 "average": round(float(data.get('avg_score', 0)), 4),
@@ -998,6 +1199,7 @@ async def upload_dataset(file: UploadFile = File(...)):
 class PredictionRequest(BaseModel):
     """Request model for combined prediction"""
     data: Dict[str, float]  # Current sensor readings
+    equipmentId: Optional[str] = None
     
     class Config:
         json_schema_extra = {
@@ -1023,6 +1225,7 @@ async def predict_combined(request: PredictionRequest):
     """
     try:
         input_data = request.data
+        equipment_id = request.equipmentId
         
         # =====================================================================
         # Part 1: Real-time Anomaly Detection (Isolation Forest)
@@ -1163,6 +1366,12 @@ async def predict_combined(request: PredictionRequest):
                 
                 # Predict MTTF
                 predicted_mttf = pred_model.predict(pred_input_scaled)[0]
+                # Apply slight per-equipment adjustment to simulate scoping
+                if equipment_id:
+                    if str(equipment_id).endswith("001"):
+                        predicted_mttf = predicted_mttf * 0.95
+                    elif str(equipment_id).endswith("014"):
+                        predicted_mttf = predicted_mttf * 1.05
                 days_estimate = predicted_mttf / 24  # Convert hours to days
                 
                 # Risk assessment based on predicted MTTF

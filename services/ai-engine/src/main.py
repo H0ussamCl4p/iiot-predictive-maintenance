@@ -75,6 +75,7 @@ def on_message(client, userdata, msg):
         payload = json.loads(msg.payload.decode())
         vib = payload['vibration']
         temp = payload['temperature']
+        hum = payload.get('humidity', None)
         
         # 2. Pre-process and Predict (if model available)
         status = "NORMAL"
@@ -109,13 +110,19 @@ def on_message(client, userdata, msg):
         # 5. Output to Terminal (Color Coded)
         # Green for Normal, Yellow for Warning, Red for Anomaly
         color = "\033[92m" if status == "NORMAL" else "\033[93m" if status == "WARNING" else "\033[91m"
-        print(f"{color}[{status}] Vib: {vib:.2f} | Temp: {temp:.2f} | Score: {score:.4f}\033[0m")
+        if hum is not None:
+            print(f"{color}[{status}] Vib: {vib:.2f} | Temp: {temp:.2f} | Hum: {float(hum):.2f} | Score: {score:.4f}\033[0m")
+        else:
+            print(f"{color}[{status}] Vib: {vib:.2f} | Temp: {temp:.2f} | Score: {score:.4f}\033[0m")
 
         # 6. SAVE TO CSV (Critical for Dashboard)
         # We append the new row to the file
         with open(LOG_FILE, "a") as f:
             timestamp = pd.Timestamp.now().strftime('%Y-%m-%d %H:%M:%S')
-            f.write(f"{timestamp},{vib},{temp},{score},{status}\n")
+            if hum is not None:
+                f.write(f"{timestamp},{vib},{temp},{hum},{score},{status}\n")
+            else:
+                f.write(f"{timestamp},{vib},{temp},,{score},{status}\n")
         
         # 7. SAVE TO INFLUXDB (For Grafana)
         if influx_client:
@@ -130,6 +137,7 @@ def on_message(client, userdata, msg):
                         "fields": {
                             "vibration": float(vib),
                             "temperature": float(temp),
+                            **({"humidity": float(hum)} if hum is not None else {}),
                             "ai_score": float(score)
                         }
                     }

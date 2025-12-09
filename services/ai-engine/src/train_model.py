@@ -1,21 +1,30 @@
 import pandas as pd
-from sklearn.ensemble import IsolationForest
+from sklearn.ensemble import IsolationForest, RandomForestRegressor
 from sklearn.preprocessing import StandardScaler
 import joblib
+import os
 
 # Configuration
 INPUT_FILE = "data/training_data.csv"
 MODEL_FILE = "model_brain.pkl"
 SCALER_FILE = "scaler.pkl"
+PREDICTIVE_MODEL_FILE = "models/predictive_model.pkl"
+PREDICTIVE_SCALER_FILE = "models/predictive_scaler.pkl"
+
+# Ensure models directory exists
+os.makedirs("models", exist_ok=True)
 
 print("🧠 Loading training data...")
 # 1. Load Data
 df = pd.read_csv(INPUT_FILE)
+# Strip whitespace from column names
+df.columns = df.columns.str.strip()
 print(f"   - Loaded {len(df)} rows.")
+print(f"   - Columns: {df.columns.tolist()}")
 
 # 2. Select Features (The columns the AI should look at)
-# We ignore 'timestamp' because time doesn't cause failure, vibration/temp does.
-features = ['vibration', 'temperature']
+# Use actual column names from the training data
+features = ['Humidity', 'Temperature', 'Age', 'Quantity']
 X = df[features].values
 
 # 3. Scale the Data (CRITICAL STEP)
@@ -34,6 +43,39 @@ model.fit(X_scaled)
 joblib.dump(model, MODEL_FILE)
 joblib.dump(scaler, SCALER_FILE)
 
-print("✅ Training Complete!")
+print("✅ Anomaly Detection Training Complete!")
 print(f"   - Model saved to: {MODEL_FILE}")
 print(f"   - Scaler saved to: {SCALER_FILE}")
+
+# 6. Train Predictive Model (Random Forest Regressor for MTTF)
+print("\n🔮 Training Predictive Model (MTTF)...")
+if 'MTTF' in df.columns:
+    # Features for prediction (same as anomaly detection)
+    X_pred = df[features].values
+    y_pred = df['MTTF'].values
+    
+    # Scale features for predictive model
+    pred_scaler = StandardScaler()
+    X_pred_scaled = pred_scaler.fit_transform(X_pred)
+    
+    # Train Random Forest Regressor
+    pred_model = RandomForestRegressor(n_estimators=100, random_state=42, max_depth=10)
+    pred_model.fit(X_pred_scaled, y_pred)
+    
+    # Save predictive model bundle as a single pickle dict the API expects
+    import pickle
+    bundle = {
+        'model': pred_model,
+        'scaler': pred_scaler,
+        'features': features,
+    }
+    with open(PREDICTIVE_MODEL_FILE, 'wb') as f:
+        pickle.dump(bundle, f, protocol=4)
+    # Optionally save scaler separately for debugging/inspection
+    joblib.dump(pred_scaler, PREDICTIVE_SCALER_FILE, protocol=4)
+    
+    print("✅ Predictive Model Training Complete!")
+    print(f"   - Model saved to: {PREDICTIVE_MODEL_FILE}")
+    print(f"   - Scaler saved to: {PREDICTIVE_SCALER_FILE}")
+else:
+    print("⚠️  MTTF column not found. Skipping predictive model training.")
