@@ -37,7 +37,7 @@ const itemVariants = {
 
 export default function BentoGrid() {
   return (
-    <section className="relative py-32 px-6 bg-zinc-950">
+    <section className="relative py-16 sm:py-24 md:py-32 px-4 sm:px-6 bg-zinc-950">
       <div className="max-w-7xl mx-auto">
         {/* Section Header */}
         <motion.div
@@ -45,16 +45,16 @@ export default function BentoGrid() {
           whileInView={{ opacity: 1, y: 0 }}
           viewport={{ once: true }}
           transition={{ duration: 0.6 }}
-          className="text-center mb-16"
+          className="text-center mb-12 sm:mb-16"
         >
-          <h2 className="text-5xl md:text-6xl font-bold tracking-tighter mb-4 text-white">
+          <h2 className="text-3xl sm:text-4xl md:text-5xl lg:text-6xl font-bold tracking-tighter mb-4 text-white">
             Built for Scale.
             <br />
             <span className="bg-gradient-to-r from-emerald-400 to-blue-500 bg-clip-text text-transparent">
               Designed for Speed.
             </span>
           </h2>
-          <p className="text-xl text-zinc-400 max-w-2xl mx-auto">
+          <p className="text-base sm:text-lg md:text-xl text-zinc-400 max-w-2xl mx-auto px-4">
             Enterprise-grade features that just work. No configuration hell.
           </p>
         </motion.div>
@@ -65,28 +65,28 @@ export default function BentoGrid() {
           initial="hidden"
           whileInView="visible"
           viewport={{ once: true }}
-          className="grid grid-cols-1 md:grid-cols-3 gap-4"
+          className="grid grid-cols-1 md:grid-cols-3 gap-3 sm:gap-4"
         >
           {/* Large Card - AI Detection */}
           <motion.div
             variants={itemVariants}
-            className="md:col-span-2 md:row-span-2 group relative p-8 rounded-3xl bg-white/5 border border-white/10 hover:border-emerald-500/50 transition-all duration-500 overflow-hidden"
+            className="md:col-span-2 md:row-span-2 group relative p-6 sm:p-8 rounded-2xl sm:rounded-3xl bg-white/5 border border-white/10 hover:border-emerald-500/50 transition-all duration-500 overflow-hidden"
           >
             {/* Glow Effect */}
             <div className="absolute inset-0 bg-gradient-to-br from-emerald-500/10 via-transparent to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-500" />
             
             <div className="relative z-10">
-              <div className="flex items-center gap-4 mb-6">
-                <div className="p-3 rounded-2xl bg-emerald-500/10 border border-emerald-500/20">
-                  <Activity className="w-8 h-8 text-emerald-500" />
+              <div className="flex items-center gap-3 sm:gap-4 mb-4 sm:mb-6">
+                <div className="p-2 sm:p-3 rounded-xl sm:rounded-2xl bg-emerald-500/10 border border-emerald-500/20">
+                  <Activity className="w-6 h-6 sm:w-8 sm:h-8 text-emerald-500" />
                 </div>
                 <div>
-                  <h3 className="text-3xl font-bold text-white">AI-Powered Detection</h3>
-                  <p className="text-zinc-400">Isolation Forest Algorithm</p>
+                  <h3 className="text-xl sm:text-2xl md:text-3xl font-bold text-white">AI-Powered Detection</h3>
+                  <p className="text-sm sm:text-base text-zinc-400">Isolation Forest Algorithm</p>
                 </div>
               </div>
 
-              <p className="text-lg text-zinc-300 mb-8 max-w-md">
+              <p className="text-sm sm:text-base md:text-lg text-zinc-300 mb-6 sm:mb-8 max-w-md">
                 Automatically detect anomalies in real-time sensor data with machine learning. 
                 No manual thresholding required.
               </p>

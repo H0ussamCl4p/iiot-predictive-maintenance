@@ -37,9 +37,9 @@ result = detector.predict(sensor_data)
 
 export default function DeveloperSection() {
   return (
-    <section className="relative py-32 px-6 bg-gradient-to-b from-zinc-950 to-black">
+    <section className="relative py-16 sm:py-24 md:py-32 px-4 sm:px-6 bg-gradient-to-b from-zinc-950 to-black">
       <div className="max-w-7xl mx-auto">
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-16 items-center">
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-8 sm:gap-12 md:gap-16 items-center">
           {/* Left: Marketing Copy */}
           <motion.div
             initial={{ opacity: 0, x: -20 }}
@@ -52,7 +52,7 @@ export default function DeveloperSection() {
               <span className="text-sm text-emerald-400 font-medium">Developer First</span>
             </div>
 
-            <h2 className="text-5xl md:text-6xl font-bold tracking-tighter mb-6 text-white">
+            <h2 className="text-3xl sm:text-4xl md:text-5xl lg:text-6xl font-bold tracking-tighter mb-4 sm:mb-6 text-white">
               Built with
               <br />
               <span className="bg-gradient-to-r from-emerald-400 via-blue-500 to-purple-500 bg-clip-text text-transparent">
@@ -60,7 +60,7 @@ export default function DeveloperSection() {
               </span>
             </h2>
 
-            <p className="text-xl text-zinc-400 mb-8 leading-relaxed">
+            <p className="text-base sm:text-lg md:text-xl text-zinc-400 mb-6 sm:mb-8 leading-relaxed">
               FastAPI backend with async Python. Powered by scikit-learn for ML inference. 
               Deploy anywhere with Docker.
             </p>
@@ -114,29 +114,29 @@ export default function DeveloperSection() {
             whileInView={{ opacity: 1, x: 0 }}
             viewport={{ once: true }}
             transition={{ duration: 0.6 }}
-            className="relative"
+            className="relative mt-8 lg:mt-0"
           >
             {/* Glow Effect */}
-            <div className="absolute -inset-4 bg-gradient-to-r from-emerald-500/20 via-blue-500/20 to-purple-500/20 rounded-3xl blur-3xl opacity-50" />
+            <div className="absolute -inset-4 bg-gradient-to-r from-emerald-500/20 via-blue-500/20 to-purple-500/20 rounded-2xl sm:rounded-3xl blur-3xl opacity-50" />
 
             {/* Terminal Window */}
-            <div className="relative rounded-2xl overflow-hidden border border-white/10 bg-zinc-950 shadow-2xl">
+            <div className="relative rounded-xl sm:rounded-2xl overflow-hidden border border-white/10 bg-zinc-950 shadow-2xl">
               {/* Terminal Header */}
-              <div className="bg-zinc-900/80 backdrop-blur-xl border-b border-white/10 px-4 py-3 flex items-center gap-2">
-                <div className="flex gap-2">
-                  <div className="w-3 h-3 rounded-full bg-red-500/80" />
-                  <div className="w-3 h-3 rounded-full bg-yellow-500/80" />
-                  <div className="w-3 h-3 rounded-full bg-green-500/80" />
+              <div className="bg-zinc-900/80 backdrop-blur-xl border-b border-white/10 px-3 sm:px-4 py-2 sm:py-3 flex items-center gap-2">
+                <div className="flex gap-1.5 sm:gap-2">
+                  <div className="w-2 h-2 sm:w-3 sm:h-3 rounded-full bg-red-500/80" />
+                  <div className="w-2 h-2 sm:w-3 sm:h-3 rounded-full bg-yellow-500/80" />
+                  <div className="w-2 h-2 sm:w-3 sm:h-3 rounded-full bg-green-500/80" />
                 </div>
-                <div className="flex-1 ml-4 flex items-center gap-2">
-                  <Terminal className="w-4 h-4 text-zinc-500" />
-                  <span className="text-xs text-zinc-500 font-mono">anomaly_detector.py</span>
+                <div className="flex-1 ml-2 sm:ml-4 flex items-center gap-2">
+                  <Terminal className="w-3 h-3 sm:w-4 sm:h-4 text-zinc-500" />
+                  <span className="text-[10px] sm:text-xs text-zinc-500 font-mono truncate">anomaly_detector.py</span>
                 </div>
               </div>
 
               {/* Code Content */}
-              <div className="p-6 overflow-x-auto">
-                <pre className="text-sm font-mono leading-relaxed">
+              <div className="p-4 sm:p-6 overflow-x-auto">
+                <pre className="text-xs sm:text-sm font-mono leading-relaxed">
                   <code>
                     {pythonCode.split('\n').map((line, i) => (
                       <motion.div

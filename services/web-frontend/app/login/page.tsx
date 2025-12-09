@@ -67,12 +67,12 @@ export default function LoginPage() {
         className="max-w-md w-full relative z-10"
       >
         {/* Logo/Brand */}
-        <div className="text-center mb-8">
-          <Link href="/" className="inline-flex items-center justify-center space-x-2 mb-4 group">
-            <Activity className="w-10 h-10 text-emerald-500 group-hover:scale-110 transition-transform" />
-            <span className="text-3xl font-bold tracking-tight">Smart Energy Guardien</span>
+        <div className="text-center mb-6 sm:mb-8">
+          <Link href="/" className="inline-flex items-center justify-center space-x-2 mb-3 sm:mb-4 group">
+            <Activity className="w-8 h-8 sm:w-10 sm:h-10 text-emerald-500 group-hover:scale-110 transition-transform" />
+            <span className="text-2xl sm:text-3xl font-bold tracking-tight">Smart Energy Guardien</span>
           </Link>
-          <p className="text-zinc-400 text-lg">
+          <p className="text-zinc-400 text-base sm:text-lg px-4">
             Welcome back to the future of maintenance
           </p>
         </div>

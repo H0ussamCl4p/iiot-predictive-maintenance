@@ -78,12 +78,12 @@ export default function DashboardPage() {
     >
       {/* Welcome Header */}
       <motion.div variants={itemVariants}>
-        <h1 className="text-4xl md:text-5xl font-bold tracking-tighter mb-3">
+        <h1 className="text-3xl sm:text-4xl md:text-5xl font-bold tracking-tighter mb-2 sm:mb-3">
           <span className="bg-gradient-to-r from-white to-white/50 bg-clip-text text-transparent">
             Welcome Back
           </span>
         </h1>
-        <p className="text-xl text-zinc-400">
+        <p className="text-base sm:text-lg md:text-xl text-zinc-400">
           Monitor your industrial fleet in real-time
         </p>
       </motion.div>
@@ -91,7 +91,7 @@ export default function DashboardPage() {
       {/* Quick Stats */}
       <motion.div 
         variants={containerVariants}
-        className="grid grid-cols-1 md:grid-cols-3 gap-4"
+        className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-3 sm:gap-4"
       >
         <motion.div variants={itemVariants} className="group relative p-6 rounded-2xl bg-white/5 border border-white/10 hover:border-emerald-500/50 transition-all overflow-hidden">
           <div className="absolute inset-0 bg-gradient-to-br from-emerald-500/10 via-transparent to-transparent opacity-0 group-hover:opacity-100 transition-opacity" />
@@ -138,8 +138,8 @@ export default function DashboardPage() {
 
       {/* Quick Actions Grid */}
       <motion.div variants={itemVariants}>
-        <h2 className="text-2xl font-bold mb-4 text-white">Quick Actions</h2>
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+        <h2 className="text-xl sm:text-2xl font-bold mb-3 sm:mb-4 text-white">Quick Actions</h2>
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 sm:gap-4">
           {/* Data Card */}
           <Link href="/dashboard/data" className="group">
             <div className="relative p-6 rounded-2xl bg-white/5 border border-white/10 hover:border-emerald-500/50 transition-all overflow-hidden">
