@@ -19,6 +19,12 @@ export default function RootLayout({
     <html lang="en">
       <body className={inter.className}>
         <Providers>{children}</Providers>
+        <footer className="w-full py-8 bg-black border-t border-white/10 text-center text-zinc-500 text-sm">
+          <div className="container mx-auto px-6">
+            <p>&copy; {new Date().getFullYear()} Smart Energy Guardien. All rights reserved.</p>
+            <p className="mt-2">Optimisation Energetique et Maintenance predicitve pour l industrie 4.0</p>
+          </div>
+        </footer>
       </body>
     </html>
   );

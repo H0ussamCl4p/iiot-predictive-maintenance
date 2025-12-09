@@ -1,131 +1,66 @@
-// Landing Page - High-conversion SaaS style
-
 import Link from 'next/link'
-import { ArrowRight, Activity, Shield, TrendingUp, Zap } from 'lucide-react'
+import { Activity } from 'lucide-react'
+import Hero from '@/components/landing/Hero'
+import BentoGrid from '@/components/landing/BentoGrid'
+import DeveloperSection from '@/components/landing/DeveloperSection'
+import StackMarquee from '@/components/landing/StackMarquee'
 
 export default function LandingPage() {
   return (
-    <div className="min-h-screen bg-gradient-to-br from-slate-950 via-slate-900 to-slate-950">
+    <div className="min-h-screen bg-zinc-950 text-white selection:bg-emerald-500/30">
       {/* Navigation */}
-      <nav className="container mx-auto px-6 py-6">
-        <div className="flex items-center justify-between">
+      <nav className="fixed top-0 w-full z-50 border-b border-white/10 bg-black/50 backdrop-blur-xl">
+        <div className="container mx-auto px-6 h-16 flex items-center justify-between">
           <div className="flex items-center space-x-2">
-            <Activity className="w-8 h-8 text-emerald-500" />
-            <span className="text-2xl font-bold text-white">IIoT Edge</span>
+            <Activity className="w-6 h-6 text-emerald-500" />
+            <span className="text-lg font-bold tracking-tight">Smart Energy Guardien</span>
           </div>
-          <Link
-            href="/login"
-            className="px-6 py-2 text-sm font-medium text-white bg-slate-700 rounded-lg hover:bg-slate-600 transition-colors"
-          >
-            Sign In
-          </Link>
+          <div className="flex items-center gap-4">
+            <Link href="/login" className="text-sm text-zinc-400 hover:text-white transition-colors">
+              Log In
+            </Link>
+            <Link
+              href="/dashboard"
+              className="px-4 py-2 text-sm font-medium text-black bg-white rounded-full hover:bg-zinc-200 transition-colors"
+            >
+              Enter Console
+            </Link>
+          </div>
         </div>
       </nav>
 
-      {/* Hero Section */}
-      <main className="container mx-auto px-6 py-20">
+      {/* Main Content */}
+      <Hero />
+      <BentoGrid />
+      <DeveloperSection />
+      <StackMarquee />
+
+      {/* Final CTA */}
+      <section className="relative py-32 px-6 bg-black">
         <div className="max-w-4xl mx-auto text-center">
-          {/* Badge */}
-          <div className="inline-flex items-center space-x-2 px-4 py-2 bg-slate-800/50 border border-slate-700 rounded-full mb-8">
-            <Zap className="w-4 h-4 text-emerald-500" />
-            <span className="text-sm text-slate-300">
-              Real-time Edge Computing
-            </span>
-          </div>
-
-          {/* Main Headline */}
-          <h1 className="text-5xl md:text-7xl font-bold text-white mb-6 leading-tight">
-            Industrial Intelligence
-            <br />
-            <span className="bg-gradient-to-r from-emerald-400 to-emerald-600 bg-clip-text text-transparent">
-              at the Edge
-            </span>
-          </h1>
-
-          {/* Subheadline */}
-          <p className="text-xl text-slate-300 mb-12 max-w-2xl mx-auto leading-relaxed">
-            AI-powered predictive maintenance for industrial machinery. 
-            Detect anomalies before they become failures. 
-            Reduce downtime by 70%.
+          <h2 className="text-5xl md:text-6xl font-bold tracking-tighter mb-6 text-white">
+            Ready to prevent downtime?
+          </h2>
+          <p className="text-xl text-zinc-400 mb-12">
+            Join hundreds of factories already using Smart Energy Guardien.
           </p>
-
-          {/* CTA Button */}
-          <div className="flex flex-col sm:flex-row items-center justify-center gap-4 mb-16">
+          <div className="flex flex-col sm:flex-row items-center justify-center gap-4">
             <Link
               href="/dashboard"
-              className="group px-8 py-4 bg-gradient-to-r from-emerald-500 to-emerald-600 text-white font-semibold rounded-lg shadow-lg shadow-emerald-500/20 hover:shadow-emerald-500/40 transition-all duration-300 flex items-center space-x-2"
+              className="px-8 py-4 bg-white text-black font-semibold rounded-full hover:bg-zinc-200 transition-all shadow-2xl shadow-white/20"
             >
-              <span>Enter Console</span>
-              <ArrowRight className="w-5 h-5 group-hover:translate-x-1 transition-transform" />
+              Let's Get Started
             </Link>
             <Link
-              href="#features"
-              className="px-8 py-4 bg-slate-800 text-white font-semibold rounded-lg hover:bg-slate-700 transition-colors"
+              href="https://github.com/H0ussamCl4p/iiot-predictive-maintenance"
+              target="_blank"
+              className="px-8 py-4 bg-zinc-900 text-white font-semibold rounded-full hover:bg-zinc-800 transition-all border border-zinc-700"
             >
-              Learn More
+              View Documentation
             </Link>
           </div>
-
-          {/* Stats */}
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-8 max-w-3xl mx-auto">
-            <div className="p-6 bg-slate-800/50 border border-slate-700 rounded-xl backdrop-blur-sm">
-              <div className="text-3xl font-bold text-emerald-500 mb-2">99.9%</div>
-              <div className="text-sm text-slate-400">Uptime Guaranteed</div>
-            </div>
-            <div className="p-6 bg-slate-800/50 border border-slate-700 rounded-xl backdrop-blur-sm">
-              <div className="text-3xl font-bold text-emerald-500 mb-2">&lt;100ms</div>
-              <div className="text-sm text-slate-400">Response Time</div>
-            </div>
-            <div className="p-6 bg-slate-800/50 border border-slate-700 rounded-xl backdrop-blur-sm">
-              <div className="text-3xl font-bold text-emerald-500 mb-2">24/7</div>
-              <div className="text-sm text-slate-400">Monitoring</div>
-            </div>
-          </div>
         </div>
-
-        {/* Features Section */}
-        <div id="features" className="mt-32 max-w-6xl mx-auto">
-          <h2 className="text-3xl font-bold text-white text-center mb-16">
-            Enterprise-Grade Features
-          </h2>
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-8">
-            <div className="p-8 bg-slate-800/30 border border-slate-700 rounded-xl hover:border-emerald-500/50 transition-colors">
-              <Shield className="w-12 h-12 text-emerald-500 mb-4" />
-              <h3 className="text-xl font-semibold text-white mb-3">
-                Anomaly Detection
-              </h3>
-              <p className="text-slate-400">
-                ML-powered Isolation Forest algorithm identifies equipment failures before they happen.
-              </p>
-            </div>
-            <div className="p-8 bg-slate-800/30 border border-slate-700 rounded-xl hover:border-emerald-500/50 transition-colors">
-              <Activity className="w-12 h-12 text-emerald-500 mb-4" />
-              <h3 className="text-xl font-semibold text-white mb-3">
-                Real-time Monitoring
-              </h3>
-              <p className="text-slate-400">
-                Live vibration and temperature sensors with sub-second refresh rates.
-              </p>
-            </div>
-            <div className="p-8 bg-slate-800/30 border border-slate-700 rounded-xl hover:border-emerald-500/50 transition-colors">
-              <TrendingUp className="w-12 h-12 text-emerald-500 mb-4" />
-              <h3 className="text-xl font-semibold text-white mb-3">
-                Predictive Analytics
-              </h3>
-              <p className="text-slate-400">
-                Historical trend analysis and forecasting for maintenance planning.
-              </p>
-            </div>
-          </div>
-        </div>
-      </main>
-
-      {/* Footer */}
-      <footer className="container mx-auto px-6 py-8 mt-32 border-t border-slate-800">
-        <div className="text-center text-slate-500">
-          <p>&copy; 2025 IIoT Edge Intelligence. All rights reserved.</p>
-        </div>
-      </footer>
+      </section>
     </div>
   )
 }
